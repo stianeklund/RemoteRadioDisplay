@@ -3,6 +3,13 @@ SET(SOURCES screens/ui_Screen1.c
     ui.c
     components/ui_comp_hook.c
     ui_helpers.c
-    ui_events.c)
+    ui_events.c
+    fonts/ui_font_Font16.c
+    fonts/ui_font_Font18.c
+    fonts/ui_font_Font30.c
+    fonts/ui_font_Font48.c
+    fonts/ui_font_Frequency.c
+    fonts/ui_font_MeterFont.c
+    fonts/ui_font_UTCTime.c)
 
 add_library(ui ${SOURCES})
