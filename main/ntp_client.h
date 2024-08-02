@@ -1,9 +1,10 @@
 #ifndef NTP_CLIENT_H
 #define NTP_CLIENT_H
+#include "esp_err.h"
 
-void init_ntp_client();
+esp_err_t init_ntp_client();
 void deinit_ntp_client(void);
-void time_sync_notification_cb(struct timeval *tv);
+void ntp_sync_callback(struct timeval *tv);
 
 // Other function declarations...
 
