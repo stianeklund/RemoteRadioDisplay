@@ -1,6 +1,7 @@
 #include <time.h>
 #include <sys/time.h>
 #include "esp_log.h"
+#include "esp_newlib.h"
 #include "esp_sntp.h"
 #include "esp_netif_sntp.h"
 #include "esp_check.h"
@@ -10,7 +11,7 @@ static const char *TAG = "NTP_CLIENT";
 
 #define NTP_SERVER "pool.ntp.org"
 #define RETRY_COUNT 5
-#define RETRY_DELAY_MS 1000
+#define RETRY_DELAY_MS 1500
 
 esp_err_t init_ntp_client(void)
 {
