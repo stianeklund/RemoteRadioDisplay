@@ -347,11 +347,10 @@ void ui_Screen1_screen_init(void)
     lv_obj_set_style_text_font(ui_Ant2Label, &ui_font_Font18, LV_PART_MAIN | LV_STATE_DEFAULT);
 
     ui_UtcTime = lv_label_create(ui_Screen1);
-    //ui_UtcTime = lv_textarea_create(ui_Screen1);
     lv_obj_set_width(ui_UtcTime, 262);
     lv_obj_set_height(ui_UtcTime, LV_SIZE_CONTENT);    /// 70
-    lv_obj_set_x(ui_UtcTime, 81);
-    lv_obj_set_y(ui_UtcTime, -195);
+    lv_obj_set_x(ui_UtcTime, 95);
+    lv_obj_set_y(ui_UtcTime, -200);
     lv_obj_set_align(ui_UtcTime, LV_ALIGN_CENTER);
     // if (strlen("0123456789:") == 0) lv_textarea_set_accepted_chars(ui_UtcTime, NULL);
     // else lv_textarea_set_accepted_chars(ui_UtcTime, "0123456789:");
