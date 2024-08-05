@@ -6,8 +6,7 @@
 
 esp_err_t parse_command(void);
 uint32_t parse_frequency(const char* frequency);
-uint8_t* read_uart(void);
-void parse_uart();
+void read_uart(void);
 
 #endif // CAT_PARSER_H 
 
