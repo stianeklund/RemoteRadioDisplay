@@ -46,5 +46,5 @@ void read_uart() {
       printf("\n");
     }
   }
-  return data;
+  free(data);
 }
