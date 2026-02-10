@@ -1,0 +1,24 @@
+description: Remote Radio Display
+targets:
+- esp32s3
+- esp32p4
+dependencies:
+  lvgl/lvgl: ^9.2.0
+  espressif/esp_lvgl_port: ^2.4.0
+  idf: '>=5.5'
+  espressif/esp_lcd_touch_gt911: '>=1.1.0'
+  espressif/esp_websocket_client: '>=1.0.0'
+  espressif/mdns: '*'
+  waveshare/esp_lcd_hx8394:
+    version: "^1.0.0"
+    rules:
+      - if: "idf_version >=5.3"
+      - if: "target in [esp32p4]"
+  espressif/esp_wifi_remote:
+    version: "*"
+    rules:
+      - if: "target in [esp32p4]"
+  espressif/esp_hosted:
+    version: "*"
+    rules:
+      - if: "target in [esp32p4]"

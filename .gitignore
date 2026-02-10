@@ -1,0 +1,46 @@
+# Build output
+build/
+*.d
+*.o
+*.obj
+*.slo
+*.lo
+*.gch
+*.pch
+
+# Libraries
+*.so
+*.dylib
+*.dll
+*.lai
+*.la
+*.a
+*.lib
+
+# Executables
+*.exe
+*.out
+*.app
+
+# ESP-IDF
+managed_components/
+sdkconfig
+sdkconfig.old
+
+# IDE
+.idea/
+.vscode/
+cmake-build-debug/
+
+# AI tooling
+.claude/
+CLAUDE.md
+AGENTS.md
+.aider*
+
+# OS / editor junk
+*.log
+nul
+*~
+*.swp
+*.un~

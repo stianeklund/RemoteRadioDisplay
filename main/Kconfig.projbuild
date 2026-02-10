@@ -1,0 +1,129 @@
+menu "Remote Radio Display"
+
+    menu "WiFi Configuration"
+
+        config ESP_WIFI_SSID
+            string "WiFi SSID"
+            default "myssid"
+            help
+                SSID of the Wi-Fi network to connect to.
+
+        config ESP_WIFI_PASSWORD
+            string "WiFi Password"
+            default "mypassword"
+            help
+                Password of the Wi-Fi network.
+
+        config ESP_MAXIMUM_RETRY
+            int "Maximum Connect Retries"
+            default 5
+            range 1 20
+            help
+                Maximum number of times to retry connecting to Wi-Fi before giving up.
+
+    endmenu
+
+    menu "Antenna Controller"
+        
+        config ANTENNA_SERVER_HOSTNAME
+            string "Antenna Controller Hostname"
+            default "antenna-controller.local"
+            help
+                Hostname or IP address of the antenna controller WebSocket server.
+                Examples: "192.168.1.100" or "antenna-controller.local"
+
+        config ANTENNA_SERVER_PORT
+            int "Antenna Controller Port"
+            default 80
+            range 1 65535
+            help
+                Port number of the antenna controller WebSocket server.
+
+        config ANTENNA_WS_URI
+            string "WebSocket URI Path"
+            default "/ws"
+            help
+                URI path for the WebSocket endpoint on the antenna controller.
+
+        config ANTENNA_RECONNECT_INTERVAL
+            int "Reconnection Interval (seconds)"
+            default 5
+            range 1 60
+            help
+                Interval between WebSocket reconnection attempts when disconnected.
+
+        config ANTENNA_ENABLE_MDNS_LOOKUP
+            bool "Enable mDNS hostname resolution"
+            default y
+            help
+                Enable mDNS to resolve .local hostnames to IP addresses.
+                Required if using hostname instead of IP address.
+
+        config ANTENNA_CONNECTION_TIMEOUT
+            int "Connection Timeout (seconds)" 
+            default 10
+            range 5 60
+            help
+                Timeout for WebSocket connection establishment.
+
+        config ANTENNA_APP_HEARTBEAT_ENABLE
+            bool "Enable application heartbeat over WebSocket"
+            default n
+            help
+                When enabled, periodically sends a lightweight request (status)
+                as an application-layer heartbeat to keep the server-side
+                activity counter alive and detect dead connections. This is
+                complementary to WebSocket ping/pong and TCP keepalive.
+
+        config ANTENNA_APP_HEARTBEAT_INTERVAL
+            int "Application heartbeat interval (seconds)"
+            depends on ANTENNA_APP_HEARTBEAT_ENABLE
+            default 90
+            range 10 600
+            help
+                Interval between application-level heartbeat messages.
+                Recommended 60–120 seconds for typical WiFi/NAT environments.
+
+    endmenu
+
+    menu "CAT Interface (TS-590SG)"
+
+        choice CAT_UART_PORT
+            prompt "UART Port"
+            default CAT_UART_PORT_UART1
+            help
+                Select which UART peripheral to use for CAT communication with the TS-590SG.
+            config CAT_UART_PORT_UART0
+                bool "UART0"
+            config CAT_UART_PORT_UART1
+                bool "UART1"
+            config CAT_UART_PORT_UART2
+                bool "UART2"
+        endchoice
+
+        config CAT_UART_BAUD
+            int "Baud Rate"
+            default 57600
+            range 4800 115200
+            help
+                Baud rate for CAT serial communication.
+                Must match the TS-590SG Menu 67 (COM port baud rate) setting.
+                Common values: 4800, 9600, 19200, 38400, 57600, 115200
+
+        config CAT_UART_TX_PIN
+            int "TX GPIO Pin"
+            default 17
+            range 0 48
+            help
+                GPIO pin for UART TX (ESP32 transmit to radio).
+
+        config CAT_UART_RX_PIN
+            int "RX GPIO Pin"
+            default 18
+            range 0 48
+            help
+                GPIO pin for UART RX (ESP32 receive from radio).
+
+    endmenu
+
+endmenu
