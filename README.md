@@ -1,6 +1,6 @@
 # Remote Radio Display
 
-Touchscreen display firmware for Kenwood TS-590SG remote operation. Acts as a source-aware bridge: PC software talks to the display as if it were the rig, while the display forwards CAT commands, tracks radio state, and renders a real-time operating UI.
+Standalone touchscreen display firmware for Kenwood TS-590SG operation. Connects directly to the radio via UART, parses CAT commands to track radio state, and renders a real-time operating UI with touch controls.
 
 ## Supported Hardware
 
@@ -13,16 +13,28 @@ Both boards use 16+ MB flash and PSRAM. The ESP32-P4 board includes an ESP32-C6 
 
 ## Features
 
-- **CAT Protocol**: Stateful TS-590SG CAT parser (`main/cat_parser.cpp`) with UART transport and bidirectional forwarding.
+- **CAT Protocol**: Stateful TS-590SG CAT parser (`main/cat_parser.cpp`) with UART transport.
 - **Touchscreen UI**: LVGL-based interface with resolution-independent scaling across both targets.
-- **Remote Operation**: WiFi + WebSocket path for WAN operation alongside local USB-CDC/UART.
+- **Remote Operation**: WiFi connectivity for antenna control and time synchronization.
 - **Antenna Control**: WebSocket-based antenna switch integration with local state caching.
 - **GPS/NTP**: Time synchronization via NTP or GPS serial input.
 - **System Health**: Heap/stack monitoring, task watchdogs, and CAT activity tracking.
 
+## Screenshots
+
+| Main operating screen | Settings & display |
+|---|---|
+| ![Main screen](assets/RemoteRadioDisplay_mrOegpQKQ9.png) | ![Display settings](assets/RemoteRadioDisplay_qM2DKpcEiY.png) |
+| S/ALC/SWR meters, frequency, mode, VFO and function keys | Categorized settings with display brightness control |
+
+| CAT & Transverter config | Antenna switching |
+|---|---|
+| ![CAT settings](assets/RemoteRadioDisplay_mhcj4QMzFR.png) | ![Antenna selection](assets/RemoteRadioDisplay_3VG6CJqHG3.png) |
+| Transverter offset, CAT polling, and AI mode toggles | One-touch antenna relay switching via WebSocket |
+
 ## Prerequisites
 
-- [ESP-IDF](https://docs.espressif.com/projects/esp-idf/en/stable/esp32s3/get-started/) v5.4 or newer
+- [ESP-IDF](https://docs.espressif.com/projects/esp-idf/en/stable/esp32s3/get-started/) v5.5 or newer
 - Kenwood TS-590SG (or compatible CAT rig) on the CAT UART
 - Optional: network access to the antenna controller service
 
