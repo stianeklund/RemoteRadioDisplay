@@ -105,12 +105,18 @@ static uint8_t ui_macro_count = 0;
 static uint8_t ui_macro_fkey_assignments[MACRO_FKEY_SLOTS] = {0};  // macro_id for each F-key slot (0=empty)
 static int ui_macro_selected_index = -1;  // Currently selected row for deletion (-1=none)
 
-// Inline macro editor state (table-based editing)
+// Inline macro editor state (context-aware dual-pane editing)
 typedef struct {
     lv_obj_t *edit_overlay;       // Full overlay panel for editing (covers macro list)
-    lv_obj_t *keyboard;           // Keyboard in overlay
+    lv_obj_t *context_panel;      // Top pane: context view (50% height)
+    lv_obj_t *edit_panel;         // Bottom pane: textarea + keyboard (50% height)
+    lv_obj_t *keyboard;           // Keyboard in edit panel
     lv_obj_t *active_textarea;    // Currently editing textarea (name or command)
     lv_obj_t *edit_label;         // Label showing what's being edited
+    lv_obj_t *context_id_label;   // Context: "Editing Macro #3"
+    lv_obj_t *context_name_label; // Context: "Name: [current value]"
+    lv_obj_t *context_cmd_label;  // Context: "Command: [current value]"
+    lv_obj_t *context_fkey_label; // Context: "F-Key: F3" or "F-Key: Unassigned"
     lv_obj_t *table_container;    // Main table container for scrolling
     lv_obj_t *fkey_popup;         // F-key assignment popup
     uint8_t editing_macro_id;     // 0 = new macro, 1-50 = existing
@@ -221,14 +227,6 @@ void ui_macro_request_refresh(void);  // Non-static: debounced refresh for batch
 void ui_macro_set_cached(uint8_t id, const char *name, const char *cmd);  // Non-static: called from cat_parser.cpp
 void ui_macro_set_fkey_assignment(uint8_t fkey, uint8_t macro_id);  // Non-static: called from cat_parser.cpp
 
-// Sidebar collapse/expand for full-screen macro editing
-static bool g_sidebar_collapsed = false;
-static lv_obj_t *g_sidebar_expand_btn = NULL;    // Expand button shown when collapsed (on screen)
-static lv_obj_t *g_sidebar_header_chevron = NULL; // Chevron label in header for collapse indicator
-static void ui_sidebar_set_collapsed(bool collapsed);
-static void ui_sidebar_toggle(void);
-static void ui_sidebar_toggle_cb(lv_event_t *e);
-
 // Antenna state cache for smart updates
 typedef struct {
     int current_antenna;
@@ -264,12 +262,7 @@ static void back_event_handler(lv_event_t * e)
     lv_obj_t * menu = (lv_obj_t *)lv_event_get_user_data(e);
 
     if(code == LV_EVENT_CLICKED) {
-        // Handle clicks from either the back button or the Settings header
-        bool is_back_button = lv_menu_back_button_is_root(menu, obj);
-        bool is_settings_header = (obj == lv_menu_get_sidebar_header(menu));
-
-        if (is_back_button || is_settings_header) {
-            // NVS save disabled - just return to Screen1
+        if (lv_menu_back_button_is_root(menu, obj)) {
             _ui_screen_change(&ui_Screen1, LV_SCR_LOAD_ANIM_NONE, 0, 0, &ui_Screen1_screen_init);
         }
     }
@@ -1566,22 +1559,12 @@ void ui_Screen2_screen_init(void) {
         lv_obj_set_scroll_dir(menu_priv->sidebar, LV_DIR_VER);
     }
 
-    // Enhanced sidebar header with collapse chevron
+    // Style the sidebar header
     lv_obj_t *sidebar_header = lv_menu_get_sidebar_header(ui_Menu);
     if (sidebar_header) {
-        // Use flex layout for header: [Settings text] ... [chevron]
-        lv_obj_set_flex_flow(sidebar_header, LV_FLEX_FLOW_ROW);
-        lv_obj_set_flex_align(sidebar_header, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-
-        // Style the header container
         lv_obj_set_style_pad_ver(sidebar_header, ui_sy(12), LV_PART_MAIN | LV_STATE_DEFAULT);
         lv_obj_set_style_pad_hor(sidebar_header, ui_sx(15), LV_PART_MAIN | LV_STATE_DEFAULT);
         lv_obj_set_style_bg_color(sidebar_header, lv_color_hex(COLOR_BG_DARK), LV_PART_MAIN | LV_STATE_DEFAULT);
-
-        // Make the entire header clickable for sidebar toggle
-        lv_obj_add_flag(sidebar_header, LV_OBJ_FLAG_CLICKABLE);
-        lv_obj_set_style_bg_color(sidebar_header, lv_color_hex(0x3a3a4a), LV_PART_MAIN | LV_STATE_PRESSED);
-        lv_obj_set_style_bg_opa(sidebar_header, LV_OPA_COVER, LV_PART_MAIN | LV_STATE_PRESSED);
 
         // Find the existing "Settings" label created by lv_menu and style it
         lv_obj_t *header_label = lv_obj_get_child(sidebar_header, 0);
@@ -1589,55 +1572,7 @@ void ui_Screen2_screen_init(void) {
             lv_obj_set_style_text_font(header_label, ui_font30(), LV_PART_MAIN | LV_STATE_DEFAULT);
             lv_obj_set_style_text_color(header_label, lv_color_hex(COLOR_TEXT), LV_PART_MAIN | LV_STATE_DEFAULT);
         }
-
-        // Add collapse chevron on the right side of header
-        g_sidebar_header_chevron = lv_label_create(sidebar_header);
-        lv_label_set_text(g_sidebar_header_chevron, LV_SYMBOL_LEFT);
-        lv_obj_set_style_text_font(g_sidebar_header_chevron, ui_symbol_font_sm(), LV_PART_MAIN | LV_STATE_DEFAULT);
-        lv_obj_set_style_text_color(g_sidebar_header_chevron, lv_color_hex(0x888888), LV_PART_MAIN | LV_STATE_DEFAULT);
-        lv_obj_set_style_pad_left(g_sidebar_header_chevron, ui_sx(8), LV_PART_MAIN | LV_STATE_DEFAULT);
-
-        // Connect header click to sidebar toggle
-        lv_obj_add_event_cb(sidebar_header, ui_sidebar_toggle_cb, LV_EVENT_CLICKED, NULL);
     }
-
-    // Note: Skip back button customization for now to avoid crashes
-    // The default LVGL menu back button should work, even if smaller
-
-    // Create expand button on SCREEN (not menu) - fixed position on left edge
-    // Parenting to screen ensures it stays in place when sidebar hides
-    g_sidebar_expand_btn = lv_btn_create(ui_Screen2);
-    lv_obj_set_size(g_sidebar_expand_btn, ui_sx(32), ui_sy(80));
-    lv_obj_align(g_sidebar_expand_btn, LV_ALIGN_LEFT_MID, 0, 0);
-
-    // Match sidebar background with subtle right border (drawer handle look)
-    lv_obj_set_style_bg_color(g_sidebar_expand_btn, lv_color_hex(COLOR_BG_DARK), LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_bg_color(g_sidebar_expand_btn, lv_color_hex(0x3a3a4a), LV_PART_MAIN | LV_STATE_PRESSED);
-    lv_obj_set_style_bg_opa(g_sidebar_expand_btn, LV_OPA_COVER, LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_radius(g_sidebar_expand_btn, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
-
-    // Right border as visual separator
-    lv_obj_set_style_border_width(g_sidebar_expand_btn, 1, LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_border_color(g_sidebar_expand_btn, lv_color_hex(0x444444), LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_border_side(g_sidebar_expand_btn, LV_BORDER_SIDE_RIGHT, LV_PART_MAIN | LV_STATE_DEFAULT);
-
-    // Subtle shadow for depth
-    lv_obj_set_style_shadow_width(g_sidebar_expand_btn, 6, LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_shadow_color(g_sidebar_expand_btn, lv_color_hex(0x000000), LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_shadow_opa(g_sidebar_expand_btn, LV_OPA_40, LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_obj_set_style_shadow_ofs_x(g_sidebar_expand_btn, 2, LV_PART_MAIN | LV_STATE_DEFAULT);
-
-    lv_obj_add_event_cb(g_sidebar_expand_btn, ui_sidebar_toggle_cb, LV_EVENT_CLICKED, NULL);
-
-    // Chevron icon pointing right (expand direction)
-    lv_obj_t *expand_lbl = lv_label_create(g_sidebar_expand_btn);
-    lv_label_set_text(expand_lbl, LV_SYMBOL_RIGHT);
-    lv_obj_set_style_text_font(expand_lbl, ui_symbol_font_sm(), 0);
-    lv_obj_set_style_text_color(expand_lbl, lv_color_hex(0x888888), 0);
-    lv_obj_center(expand_lbl);
-
-    // Start hidden - only show when sidebar is collapsed
-    lv_obj_add_flag(g_sidebar_expand_btn, LV_OBJ_FLAG_HIDDEN);
 
     // ===== Build all pages immediately with enhanced styling =====
     // Enhanced Display page
@@ -2237,69 +2172,6 @@ void ui_event_RebootButton(lv_event_t * e) {
 }
 
 // ============================================================================
-// SIDEBAR COLLAPSE/EXPAND FOR FULL-SCREEN PAGES
-// ============================================================================
-
-static void ui_sidebar_set_collapsed(bool collapsed)
-{
-    if (ui_Menu == NULL) return;
-
-    lv_menu_t *menu_priv = (lv_menu_t *)ui_Menu;
-    if (menu_priv->sidebar == NULL) return;
-
-    g_sidebar_collapsed = collapsed;
-
-    if (collapsed) {
-        lv_obj_add_flag(menu_priv->sidebar, LV_OBJ_FLAG_HIDDEN);
-        // Show expand button on screen edge
-        if (g_sidebar_expand_btn) {
-            lv_obj_remove_flag(g_sidebar_expand_btn, LV_OBJ_FLAG_HIDDEN);
-        }
-        ESP_LOGI(TAG, "Sidebar collapsed");
-    } else {
-        lv_obj_remove_flag(menu_priv->sidebar, LV_OBJ_FLAG_HIDDEN);
-        // Hide expand button
-        if (g_sidebar_expand_btn) {
-            lv_obj_add_flag(g_sidebar_expand_btn, LV_OBJ_FLAG_HIDDEN);
-        }
-        // Update header chevron to point left (collapse direction)
-        if (g_sidebar_header_chevron) {
-            lv_label_set_text(g_sidebar_header_chevron, LV_SYMBOL_LEFT);
-        }
-        ESP_LOGI(TAG, "Sidebar expanded");
-    }
-}
-
-static void ui_sidebar_toggle(void)
-{
-    ui_sidebar_set_collapsed(!g_sidebar_collapsed);
-}
-
-// Callback for sidebar collapse/expand button clicks
-static void ui_sidebar_toggle_cb(lv_event_t *e)
-{
-    (void)e;
-    ui_sidebar_toggle();
-}
-
-// Async callback to refresh macro list after sidebar toggle (for macros page only)
-static void ui_macro_async_refresh_cb(void *user_data)
-{
-    (void)user_data;
-    ui_macro_refresh_list();
-}
-
-static void ui_macro_sidebar_toggle_cb(lv_event_t *e)
-{
-    (void)e;
-    ui_sidebar_toggle();
-
-    // Schedule refresh asynchronously to avoid lock issues
-    // (we're in LVGL event context which holds the lock)
-    lv_async_call(ui_macro_async_refresh_cb, NULL);
-}
-
-// ============================================================================
 // MACRO LIST - KENWOOD TS-590SG STYLE TABLE UI
 // ============================================================================
 
@@ -2310,6 +2182,43 @@ static void ui_macro_sidebar_toggle_cb(lv_event_t *e)
 #define MACRO_COLOR_FKEY_ACTIVE  0x4DAAFF  // Assigned F-key (light blue)
 #define MACRO_COLOR_FKEY_EMPTY   0x666666  // Unassigned F-key (gray)
 #define MACRO_EDIT_OVERLAY_BG    0x1a1a1a  // Dark overlay background for editing
+
+// Custom keyboard map for CAT command/macro editing
+// Single mode: A-Z, 0-9, and CAT-relevant special chars, no mode switching
+static const char * const cat_kb_map[] = {
+    "1", "2", "3", "4", "5", "6", "7", "8", "9", "0", LV_SYMBOL_BACKSPACE, "\n",
+    "Q", "W", "E", "R", "T", "Y", "U", "I", "O", "P", "|", ";", "\n",
+    "A", "S", "D", "F", "G", "H", "J", "K", "L", ",", "-", ".", "\n",
+    LV_SYMBOL_CLOSE, "Z", "X", "C", "V", "B", "N", "M",
+    LV_SYMBOL_LEFT, " ", LV_SYMBOL_RIGHT, LV_SYMBOL_OK, ""
+};
+
+// Helper to combine buttonmatrix ctrl flags without C++ enum conversion errors
+#define KB_W(width)    static_cast<lv_buttonmatrix_ctrl_t>(width)
+#define KB_CTRL(flags, width) static_cast<lv_buttonmatrix_ctrl_t>((flags) | (width))
+#define KB_POP(width)  KB_CTRL(LV_BUTTONMATRIX_CTRL_POPOVER, width)
+#define KB_CHK(width)  KB_CTRL(LV_BUTTONMATRIX_CTRL_CHECKED, width)
+#define KB_BTN(width)  KB_CTRL(LV_KEYBOARD_CTRL_BUTTON_FLAGS, width)
+
+static const lv_buttonmatrix_ctrl_t cat_kb_ctrl[] = {
+    // Row 1: digits (width 4) + backspace (wider, checked)
+    KB_W(4), KB_W(4), KB_W(4), KB_W(4), KB_W(4),
+    KB_W(4), KB_W(4), KB_W(4), KB_W(4), KB_W(4), KB_CHK(7),
+    // Row 2: letters (popover, width 3) + special chars (checked, width 3)
+    KB_POP(3), KB_POP(3), KB_POP(3), KB_POP(3), KB_POP(3),
+    KB_POP(3), KB_POP(3), KB_POP(3), KB_POP(3), KB_POP(3),
+    KB_CHK(3), KB_CHK(3),
+    // Row 3: letters (popover) + special chars (checked)
+    KB_POP(3), KB_POP(3), KB_POP(3), KB_POP(3), KB_POP(3),
+    KB_POP(3), KB_POP(3), KB_POP(3), KB_POP(3),
+    KB_CHK(3), KB_CHK(3), KB_CHK(3),
+    // Row 4: cancel(5) + letters(3) + left(3) + space(6) + right(3) + ok(5)
+    KB_BTN(5),
+    KB_POP(3), KB_POP(3), KB_POP(3), KB_POP(3),
+    KB_POP(3), KB_POP(3), KB_POP(3),
+    KB_CHK(3), KB_W(6), KB_CHK(3),
+    KB_BTN(5),
+};
 
 // Column widths - scaled for multi-resolution support
 #define MACRO_COL_ID_W      ui_sx(28)
@@ -2657,29 +2566,87 @@ void ui_macro_start_inline_edit(int cache_index, bool edit_name)
         lv_obj_set_style_bg_color(macro->row_container, lv_color_hex(MACRO_COLOR_ROW_SELECTED), 0);
     }
 
-    // Create overlay panel that covers the macro content area
+    // Create dual-pane overlay: top 50% = context, bottom 50% = textarea + keyboard
     if (!macro_editor.edit_overlay) {
+        // Main overlay container (covers full content area)
         macro_editor.edit_overlay = lv_obj_create(ui_MenuPageMacros);
         lv_obj_set_size(macro_editor.edit_overlay, LV_PCT(100), LV_PCT(100));
         lv_obj_align(macro_editor.edit_overlay, LV_ALIGN_TOP_LEFT, 0, 0);
         lv_obj_set_style_bg_color(macro_editor.edit_overlay, lv_color_hex(MACRO_EDIT_OVERLAY_BG), 0);
         lv_obj_set_style_bg_opa(macro_editor.edit_overlay, LV_OPA_COVER, 0);
         lv_obj_set_style_border_width(macro_editor.edit_overlay, 0, 0);
-        lv_obj_set_style_pad_all(macro_editor.edit_overlay, ui_sx(8), 0);
+        lv_obj_set_style_pad_all(macro_editor.edit_overlay, 0, 0); // No padding, panes handle it
         lv_obj_set_style_radius(macro_editor.edit_overlay, 0, 0);
         lv_obj_remove_flag(macro_editor.edit_overlay, LV_OBJ_FLAG_SCROLLABLE);
 
-        // Label showing what we're editing
-        macro_editor.edit_label = lv_label_create(macro_editor.edit_overlay);
+        // ===== TOP PANE (25%): Context View =====
+        macro_editor.context_panel = lv_obj_create(macro_editor.edit_overlay);
+        lv_obj_set_size(macro_editor.context_panel, LV_PCT(100), LV_PCT(25));
+        lv_obj_align(macro_editor.context_panel, LV_ALIGN_TOP_MID, 0, 0);
+        lv_obj_set_style_bg_color(macro_editor.context_panel, lv_color_hex(0x1a1a1a), 0); // Darker bg
+        lv_obj_set_style_bg_opa(macro_editor.context_panel, LV_OPA_COVER, 0);
+        lv_obj_set_style_border_width(macro_editor.context_panel, 0, 0);
+        lv_obj_set_style_border_side(macro_editor.context_panel, LV_BORDER_SIDE_BOTTOM, 0);
+        lv_obj_set_style_border_color(macro_editor.context_panel, lv_color_hex(COLOR_SELECTIVE_YELLOW), 0);
+        lv_obj_set_style_border_width(macro_editor.context_panel, 2, 0); // 2px divider at bottom
+        lv_obj_set_style_pad_all(macro_editor.context_panel, ui_sx(8), 0);
+        lv_obj_set_style_radius(macro_editor.context_panel, 0, 0);
+        lv_obj_remove_flag(macro_editor.context_panel, LV_OBJ_FLAG_SCROLLABLE);
+
+        // Context: Macro ID header
+        macro_editor.context_id_label = lv_label_create(macro_editor.context_panel);
+        lv_obj_set_style_text_color(macro_editor.context_id_label, lv_color_hex(COLOR_SELECTIVE_YELLOW), 0);
+        lv_obj_set_style_text_font(macro_editor.context_id_label, ui_font16(), 0);
+        lv_obj_align(macro_editor.context_id_label, LV_ALIGN_TOP_LEFT, 0, 0);
+        lv_label_set_text(macro_editor.context_id_label, "Editing Macro");
+
+        // Context: Name display (read-only)
+        macro_editor.context_name_label = lv_label_create(macro_editor.context_panel);
+        lv_obj_set_width(macro_editor.context_name_label, LV_PCT(100));
+        lv_obj_set_style_text_color(macro_editor.context_name_label, lv_color_hex(0xCCCCCC), 0);
+        lv_obj_set_style_text_font(macro_editor.context_name_label, ui_font16(), 0);
+        lv_obj_align(macro_editor.context_name_label, LV_ALIGN_TOP_LEFT, 0, ui_sy(22));
+        lv_label_set_text(macro_editor.context_name_label, "Name: ");
+        lv_label_set_long_mode(macro_editor.context_name_label, LV_LABEL_LONG_WRAP);
+
+        // Context: Command display (read-only)
+        macro_editor.context_cmd_label = lv_label_create(macro_editor.context_panel);
+        lv_obj_set_width(macro_editor.context_cmd_label, LV_PCT(100));
+        lv_obj_set_style_text_color(macro_editor.context_cmd_label, lv_color_hex(0xCCCCCC), 0);
+        lv_obj_set_style_text_font(macro_editor.context_cmd_label, ui_font16(), 0);
+        lv_obj_align(macro_editor.context_cmd_label, LV_ALIGN_TOP_LEFT, 0, ui_sy(42));
+        lv_label_set_text(macro_editor.context_cmd_label, "Command: ");
+        lv_label_set_long_mode(macro_editor.context_cmd_label, LV_LABEL_LONG_WRAP);
+
+        // Context: F-key assignment badge
+        macro_editor.context_fkey_label = lv_label_create(macro_editor.context_panel);
+        lv_obj_set_style_text_color(macro_editor.context_fkey_label, lv_color_hex(COLOR_ARGENTINIAN_BLUE), 0);
+        lv_obj_set_style_text_font(macro_editor.context_fkey_label, ui_font16(), 0);
+        lv_obj_align(macro_editor.context_fkey_label, LV_ALIGN_TOP_LEFT, 0, ui_sy(62));
+        lv_label_set_text(macro_editor.context_fkey_label, "F-Key: Unassigned");
+
+        // ===== BOTTOM PANE (75%): Edit Area =====
+        macro_editor.edit_panel = lv_obj_create(macro_editor.edit_overlay);
+        lv_obj_set_size(macro_editor.edit_panel, LV_PCT(100), LV_PCT(75));
+        lv_obj_align(macro_editor.edit_panel, LV_ALIGN_BOTTOM_MID, 0, 0);
+        lv_obj_set_style_bg_color(macro_editor.edit_panel, lv_color_hex(MACRO_EDIT_OVERLAY_BG), 0);
+        lv_obj_set_style_bg_opa(macro_editor.edit_panel, LV_OPA_COVER, 0);
+        lv_obj_set_style_border_width(macro_editor.edit_panel, 0, 0);
+        lv_obj_set_style_pad_all(macro_editor.edit_panel, ui_sx(8), 0);
+        lv_obj_set_style_radius(macro_editor.edit_panel, 0, 0);
+        lv_obj_remove_flag(macro_editor.edit_panel, LV_OBJ_FLAG_SCROLLABLE);
+
+        // Label showing what field we're editing (in edit panel)
+        macro_editor.edit_label = lv_label_create(macro_editor.edit_panel);
         lv_obj_set_style_text_color(macro_editor.edit_label, lv_color_hex(COLOR_SELECTIVE_YELLOW), 0);
         lv_obj_set_style_text_font(macro_editor.edit_label, ui_font16(), 0);
         lv_obj_align(macro_editor.edit_label, LV_ALIGN_TOP_LEFT, ui_sx(4), 0);
 
-        // Textarea at top of overlay
-        macro_editor.active_textarea = lv_textarea_create(macro_editor.edit_overlay);
+        // Textarea for editing (in edit panel)
+        macro_editor.active_textarea = lv_textarea_create(macro_editor.edit_panel);
         lv_textarea_set_one_line(macro_editor.active_textarea, true);
-        lv_obj_set_size(macro_editor.active_textarea, LV_PCT(100), ui_sy(44));
-        lv_obj_align(macro_editor.active_textarea, LV_ALIGN_TOP_MID, 0, ui_sy(28));
+        lv_obj_set_size(macro_editor.active_textarea, LV_PCT(100), ui_sy(40));
+        lv_obj_align(macro_editor.active_textarea, LV_ALIGN_TOP_MID, 0, ui_sy(26));
         lv_obj_set_style_bg_color(macro_editor.active_textarea, lv_color_hex(0x2a3a4a), 0);
         lv_obj_set_style_border_color(macro_editor.active_textarea, lv_color_hex(COLOR_SELECTIVE_YELLOW), 0);
         lv_obj_set_style_border_width(macro_editor.active_textarea, 2, 0);
@@ -2687,22 +2654,66 @@ void ui_macro_start_inline_edit(int cache_index, bool edit_name)
         lv_obj_set_style_text_font(macro_editor.active_textarea, ui_font16(), 0);
         lv_obj_set_style_radius(macro_editor.active_textarea, 4, 0);
 
-        // Large keyboard filling the rest
-        macro_editor.keyboard = lv_keyboard_create(macro_editor.edit_overlay);
-        lv_keyboard_set_mode(macro_editor.keyboard, LV_KEYBOARD_MODE_TEXT_UPPER);
-        lv_obj_set_size(macro_editor.keyboard, LV_PCT(100), ui_sy(260));  // Large keyboard
+        // Keyboard (resized to fit in bottom pane)
+        macro_editor.keyboard = lv_keyboard_create(macro_editor.edit_panel);
+        lv_keyboard_set_map(macro_editor.keyboard, LV_KEYBOARD_MODE_USER_1, cat_kb_map, cat_kb_ctrl);
+        lv_keyboard_set_mode(macro_editor.keyboard, LV_KEYBOARD_MODE_USER_1);
+        lv_obj_set_size(macro_editor.keyboard, LV_PCT(100), ui_sy(230));
         lv_obj_align(macro_editor.keyboard, LV_ALIGN_BOTTOM_MID, 0, 0);
         lv_obj_add_event_cb(macro_editor.keyboard, ui_macro_keyboard_event_cb, LV_EVENT_READY, NULL);
         lv_obj_add_event_cb(macro_editor.keyboard, ui_macro_keyboard_event_cb, LV_EVENT_CANCEL, NULL);
     }
 
-    // Update label text
-    char label_txt[64];
-    snprintf(label_txt, sizeof(label_txt), "Edit %s for macro #%d:",
-             edit_name ? "NAME" : "COMMAND", macro->id);
+    // ===== Update Context Panel with Current Macro Data =====
+    char label_txt[128];
+
+    // Context: Macro ID header
+    snprintf(label_txt, sizeof(label_txt), "Editing Macro #%d", macro->id);
+    lv_label_set_text(macro_editor.context_id_label, label_txt);
+
+    // Context: Name (always show current value)
+    snprintf(label_txt, sizeof(label_txt), "Name: %s",
+             strlen(macro->name) > 0 ? macro->name : "(empty)");
+    lv_label_set_text(macro_editor.context_name_label, label_txt);
+
+    // Context: Command (always show current value)
+    snprintf(label_txt, sizeof(label_txt), "Command: %s",
+             strlen(macro->command) > 0 ? macro->command : "(empty)");
+    lv_label_set_text(macro_editor.context_cmd_label, label_txt);
+
+    // Context: F-key assignment
+    const char *fkey_text = "Unassigned";
+    for (int i = 0; i < MACRO_FKEY_SLOTS; i++) {
+        if (ui_macro_fkey_assignments[i] == macro->id) {
+            static char fkey_buf[16];
+            snprintf(fkey_buf, sizeof(fkey_buf), "F%d", i + 1);
+            fkey_text = fkey_buf;
+            break;
+        }
+    }
+    snprintf(label_txt, sizeof(label_txt), "F-Key: %s", fkey_text);
+    lv_label_set_text(macro_editor.context_fkey_label, label_txt);
+
+    // Highlight the field being edited in context panel
+    if (edit_name) {
+        lv_obj_set_style_text_color(macro_editor.context_name_label,
+                                     lv_color_hex(COLOR_SELECTIVE_YELLOW), 0);
+        lv_obj_set_style_text_color(macro_editor.context_cmd_label,
+                                     lv_color_hex(0xCCCCCC), 0);
+    } else {
+        lv_obj_set_style_text_color(macro_editor.context_name_label,
+                                     lv_color_hex(0xCCCCCC), 0);
+        lv_obj_set_style_text_color(macro_editor.context_cmd_label,
+                                     lv_color_hex(COLOR_SELECTIVE_YELLOW), 0);
+    }
+
+    // ===== Update Edit Panel (Bottom Pane) =====
+    // Edit label shows which field is being edited
+    snprintf(label_txt, sizeof(label_txt), "Editing %s:",
+             edit_name ? "NAME" : "COMMAND");
     lv_label_set_text(macro_editor.edit_label, label_txt);
 
-    // Populate textarea
+    // Populate textarea with current value for editing
     if (edit_name) {
         lv_textarea_set_text(macro_editor.active_textarea, macro->name);
         lv_textarea_set_max_length(macro_editor.active_textarea, MACRO_NAME_MAX - 1);
@@ -2713,6 +2724,12 @@ void ui_macro_start_inline_edit(int cache_index, bool edit_name)
 
     lv_keyboard_set_textarea(macro_editor.keyboard, macro_editor.active_textarea);
     lv_obj_remove_flag(macro_editor.edit_overlay, LV_OBJ_FLAG_HIDDEN);
+
+    // Auto-hide sidebar to give the editor full width
+    lv_menu_t *menu_priv2 = (lv_menu_t *)ui_Menu;
+    if (menu_priv2->sidebar) {
+        lv_obj_add_flag(menu_priv2->sidebar, LV_OBJ_FLAG_HIDDEN);
+    }
 }
 
 static void ui_macro_inline_save(void)
@@ -2750,6 +2767,12 @@ void ui_macro_end_inline_edit(bool save)
 
     macro_editor.is_editing = false;
     macro_editor.editing_macro_id = 0;
+
+    // Restore sidebar before refreshing the list
+    lv_menu_t *menu_priv = (lv_menu_t *)ui_Menu;
+    if (menu_priv->sidebar) {
+        lv_obj_remove_flag(menu_priv->sidebar, LV_OBJ_FLAG_HIDDEN);
+    }
 
     // Hide the overlay (keeps it for reuse)
     if (macro_editor.edit_overlay) {
@@ -2957,6 +2980,15 @@ static void ui_macro_nav_down_cb(lv_event_t *e)
     }
 }
 
+static void ui_macro_nav_sidebar_cb(lv_event_t *e)
+{
+    (void)e;
+    lv_menu_t *menu_priv = (lv_menu_t *)ui_Menu;
+    if (menu_priv->sidebar) {
+        lv_obj_remove_flag(menu_priv->sidebar, LV_OBJ_FLAG_HIDDEN);
+    }
+}
+
 static void ui_macro_nav_refresh_cb(lv_event_t *e)
 {
     ESP_LOGI(TAG, "Refreshing macros from panel");
@@ -2968,15 +3000,6 @@ static void ui_macro_nav_refresh_cb(lv_event_t *e)
         snprintf(cmd, sizeof(cmd), "MXR%02d;", i);
         uart_write_message(cmd);
     }
-}
-
-static void ui_macro_nav_back_cb(lv_event_t *e)
-{
-    (void)e;
-    ESP_LOGI(TAG, "Back to settings menu");
-    // Navigate back - the menu will handle this via its back mechanism
-    // Sidebar state is preserved - user controls expand/collapse manually
-    lv_menu_set_page(ui_Menu, NULL);  // Go to root
 }
 
 static void ui_macro_nav_delete_cb(lv_event_t *e)
@@ -3015,7 +3038,7 @@ void ui_macro_populate_list(void)
     // ===== LEFT: Table container =====
     // Use more width when sidebar is collapsed (full screen mode)
     lv_obj_t *table_area = lv_obj_create(main_container);
-    lv_obj_set_size(table_area, g_sidebar_collapsed ? LV_PCT(92) : LV_PCT(88), ui_sy(310));
+    lv_obj_set_size(table_area, LV_PCT(88), ui_sy(310));
     lv_obj_set_style_bg_opa(table_area, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(table_area, 0, 0);
     lv_obj_set_style_pad_all(table_area, 0, 0);
@@ -3052,7 +3075,7 @@ void ui_macro_populate_list(void)
     lv_obj_set_width(hdr_fkey, MACRO_COL_FKEY_W);
 
     // Column header: NAME (wider when sidebar collapsed)
-    const int hdr_name_w = g_sidebar_collapsed ? ui_sx(160) : MACRO_COL_NAME_W;
+    const int hdr_name_w = MACRO_COL_NAME_W;
     lv_obj_t *hdr_name = lv_label_create(header);
     lv_label_set_text(hdr_name, "NAME");
     lv_obj_set_style_text_color(hdr_name, lv_color_hex(COLOR_SELECTIVE_YELLOW), 0);
@@ -3142,7 +3165,7 @@ void ui_macro_populate_list(void)
 
         // Column 3: Name (clickable button with visible background)
         // Wider name column when sidebar is collapsed for more editing space
-        const int name_width = g_sidebar_collapsed ? ui_sx(160) : MACRO_COL_NAME_W;
+        const int name_width = MACRO_COL_NAME_W;
         lv_obj_t *name_btn = lv_button_create(row);
         lv_obj_set_size(name_btn, name_width, MACRO_ROW_H - ui_sy(8));
         lv_obj_set_style_bg_color(name_btn, lv_color_hex(0x3a3a3a), 0);
@@ -3186,7 +3209,7 @@ void ui_macro_populate_list(void)
         lv_obj_align(cmd_lbl, LV_ALIGN_LEFT_MID, 0, 0);
     }
 
-    // ===== RIGHT: Navigation buttons (6 buttons) =====
+    // ===== RIGHT: Navigation buttons (5 buttons) =====
     lv_obj_t *nav_panel = lv_obj_create(main_container);
     lv_obj_set_size(nav_panel, MACRO_NAV_BTN_W, ui_sy(310));  // 6 buttons @ 48px + gaps
     lv_obj_set_style_bg_opa(nav_panel, LV_OPA_TRANSP, 0);
@@ -3203,7 +3226,7 @@ void ui_macro_populate_list(void)
         lv_obj_t *btn = lv_button_create(parent);
         lv_obj_set_size(btn, MACRO_NAV_BTN_W - ui_sx(4), ui_sy(48));
         lv_obj_set_style_bg_color(btn, lv_color_hex(color), 0);
-        lv_obj_set_style_bg_color(btn, lv_color_hex(color - 0x202020), LV_STATE_PRESSED);
+        lv_obj_set_style_bg_color(btn, lv_color_darken(lv_color_hex(color), LV_OPA_20), LV_STATE_PRESSED);
         lv_obj_set_style_radius(btn, 6, 0);
         lv_obj_add_event_cb(btn, cb, LV_EVENT_CLICKED, NULL);
 
@@ -3217,7 +3240,7 @@ void ui_macro_populate_list(void)
     };
 
     // Navigation buttons
-    create_nav_btn(nav_panel, LV_SYMBOL_LEFT, 0x555555, ui_macro_nav_back_cb);
+    create_nav_btn(nav_panel, LV_SYMBOL_LEFT, COLOR_SELECTIVE_YELLOW, ui_macro_nav_sidebar_cb);
     create_nav_btn(nav_panel, LV_SYMBOL_REFRESH, COLOR_SELECTIVE_YELLOW, ui_macro_nav_refresh_cb);
     create_nav_btn(nav_panel, LV_SYMBOL_PLUS, COLOR_EMERALD_GREEN, ui_macro_nav_add_cb);
     create_nav_btn(nav_panel, LV_SYMBOL_TRASH, COLOR_RED_LIGHT, ui_macro_nav_delete_cb);
