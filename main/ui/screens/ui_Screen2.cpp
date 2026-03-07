@@ -208,7 +208,7 @@ static void back_event_handler(lv_event_t * e);
 static void queue_settings_save(void);
 static void ui_update_cw_sidetone_display(int value);
 static void ui_update_cw_pitch_display(int value);
-static void ui_send_ex_menu_value(uint16_t menu, int value);
+static void ui_send_ex_menu_value(uint16_t menu, int value, int max_val);
 static lv_obj_t * create_radio_menu_row(lv_obj_t * parent, const char * label_text, int32_t min, int32_t max, int32_t val,
                                         lv_obj_t **out_slider, lv_obj_t **out_value_label);
 static void ui_update_radio_menu_item(radio_menu_slider_t *item, int value);
@@ -456,10 +456,12 @@ static lv_obj_t * create_radio_menu_row(lv_obj_t * parent, const char * label_te
 }
 
 // Helper to send EX menu commands (EX[menu]0000[value];)
-static void ui_send_ex_menu_value(uint16_t menu, int value)
+// max_val determines zero-padding width (e.g. max 20 → 2 digits, max 9 → 1 digit)
+static void ui_send_ex_menu_value(uint16_t menu, int value, int max_val)
 {
     char cmd[20];
-    snprintf(cmd, sizeof(cmd), "EX%03u0000%d;", (unsigned)menu, value);
+    int width = (max_val >= 100) ? 3 : (max_val >= 10) ? 2 : 1;
+    snprintf(cmd, sizeof(cmd), "EX%03u0000%0*d;", (unsigned)menu, width, value);
     uart_write_message(cmd);
 }
 
@@ -698,7 +700,7 @@ static void ui_event_CwSidetoneSlider(lv_event_t * e)
             lv_label_set_text(ui_CwSidetoneValueLabel, value_text);
         }
 
-        ui_send_ex_menu_value(6, (int)value);
+        ui_send_ex_menu_value(6, (int)value, 20);
         lv_subject_set_int(&radio_cw_sidetone_volume_subject, value);
 
         ESP_LOGI("UI_Screen2", "CW sidetone volume set to: %ld", (long)value);
@@ -733,7 +735,7 @@ static void ui_event_CwPitchSlider(lv_event_t * e)
         }
         // Radio EX040 uses index 0-14, where Hz = 300 + index * 50
         int pitch_index = ((int)snapped - 300) / 50;
-        ui_send_ex_menu_value(40, pitch_index);
+        ui_send_ex_menu_value(40, pitch_index, 14);
         lv_subject_set_int(&radio_cw_pitch_hz_subject, snapped);
 
         ESP_LOGI("UI_Screen2", "CW pitch set to: %ld Hz", (long)snapped);
@@ -899,7 +901,7 @@ static void ui_event_RadioMenuSlider(lv_event_t * e)
             lv_label_set_text(item->value_label, value_text);
         }
 
-        ui_send_ex_menu_value(item->menu, (int)clamped);
+        ui_send_ex_menu_value(item->menu, (int)clamped, item->max);
         if (item->subject) {
             lv_subject_set_int(item->subject, clamped);
         }
