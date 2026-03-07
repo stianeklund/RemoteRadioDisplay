@@ -701,7 +701,7 @@ static void ui_event_CwSidetoneSlider(lv_event_t * e)
         ui_send_ex_menu_value(6, (int)value);
         lv_subject_set_int(&radio_cw_sidetone_volume_subject, value);
 
-        ESP_LOGD("UI_Screen2", "CW sidetone volume set to: %ld", (long)value);
+        ESP_LOGI("UI_Screen2", "CW sidetone volume set to: %ld", (long)value);
     }
 }
 
@@ -731,10 +731,12 @@ static void ui_event_CwPitchSlider(lv_event_t * e)
             snprintf(value_text, sizeof(value_text), "%ld Hz", (long)snapped);
             lv_label_set_text(ui_CwPitchValueLabel, value_text);
         }
-        ui_send_ex_menu_value(40, (int)snapped);
+        // Radio EX040 uses index 0-14, where Hz = 300 + index * 50
+        int pitch_index = ((int)snapped - 300) / 50;
+        ui_send_ex_menu_value(40, pitch_index);
         lv_subject_set_int(&radio_cw_pitch_hz_subject, snapped);
 
-        ESP_LOGD("UI_Screen2", "CW pitch set to: %ld Hz", (long)snapped);
+        ESP_LOGI("UI_Screen2", "CW pitch set to: %ld Hz", (long)snapped);
     }
 }
 
@@ -787,7 +789,7 @@ static void ui_backlight_observer_cb(lv_observer_t *observer, lv_subject_t *subj
 static void ui_update_cw_sidetone_display(int value) {
     int clamped = value;
     if (clamped < 0) clamped = 0;
-    if (clamped > 9) clamped = 9;
+    if (clamped > 20) clamped = 20;
 
     if (lv_obj_is_valid(ui_CwSidetoneSlider)) {
         lv_obj_remove_event_cb(ui_CwSidetoneSlider, ui_event_CwSidetoneSlider);
@@ -1609,8 +1611,17 @@ void ui_Screen2_screen_init(void) {
     lv_obj_set_style_pad_all(sec_radio, ui_sx(20), LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_pad_row(sec_radio, ui_sy(14), LV_PART_MAIN | LV_STATE_DEFAULT);
 
+    // Refresh button to re-read all menu values from radio
+    lv_obj_t *row_refresh = create_button(sec_radio, LV_SYMBOL_REFRESH, "Fetch from Radio", "Refresh");
+    lv_obj_t *refresh_btn = lv_obj_get_child(row_refresh, -1);
+    lv_obj_add_event_cb(refresh_btn, [](lv_event_t *e) {
+        LV_UNUSED(e);
+        cat_request_cw_menu_update();
+        ESP_LOGI("UI_Screen2", "Radio menu refresh requested");
+    }, LV_EVENT_CLICKED, NULL);
+
     int sidetone_init = lv_subject_get_int(&radio_cw_sidetone_volume_subject);
-    create_radio_menu_row(sec_radio, "CW Sidetone", 0, 9, sidetone_init, &ui_CwSidetoneSlider, &ui_CwSidetoneValueLabel);
+    create_radio_menu_row(sec_radio, "CW Sidetone", 0, 20, sidetone_init, &ui_CwSidetoneSlider, &ui_CwSidetoneValueLabel);
     lv_obj_add_event_cb(ui_CwSidetoneSlider, ui_event_CwSidetoneSlider, LV_EVENT_VALUE_CHANGED, NULL);
     ui_update_cw_sidetone_display(sidetone_init);
 

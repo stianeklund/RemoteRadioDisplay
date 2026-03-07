@@ -2045,10 +2045,10 @@ static void parse_ex029_filter_mode(int value) {
     ESP_LOGI(TAG, "EX029 SSB-DATA filter mode: %s", mode == 0 ? "Hi/Lo Cut" : "Width/Shift");
 }
 
-// Handle EX006: CW sidetone volume (0=OFF, 1-9)
+// Handle EX006: CW sidetone volume (OFF=0, 1-20)
 static void parse_ex006_sidetone_volume(int value) {
-    if (value < 0 || value > 9) {
-        ESP_LOGW(TAG, "Invalid EX006 value: %d (expected 0-9)", value);
+    if (value < 0 || value > 20) {
+        ESP_LOGW(TAG, "Invalid EX006 value: %d (expected 0-20)", value);
         return;
     }
 
@@ -2056,21 +2056,22 @@ static void parse_ex006_sidetone_volume(int value) {
     ESP_LOGD(TAG, "EX006 CW sidetone volume: %d", value);
 }
 
-// Handle EX040: CW TX pitch / sidetone frequency (Hz, 300-1000 step 50)
+// Handle EX040: CW TX pitch / sidetone frequency
+// Radio sends index 0-14, where Hz = 300 + index * 50
 static void parse_ex040_sidetone_pitch(int value) {
-    if (value < 300 || value > 1000 || (value % 50) != 0) {
-        ESP_LOGW(TAG, "Invalid EX040 value: %d (expected 300-1000 in 50Hz steps)", value);
+    if (value < 0 || value > 14) {
+        ESP_LOGW(TAG, "Invalid EX040 index: %d (expected 0-14)", value);
         return;
     }
-
-    radio_subject_set_int_async(&radio_cw_pitch_hz_subject, value);
-    ESP_LOGD(TAG, "EX040 CW pitch: %d Hz", value);
+    int hz = 300 + value * 50;
+    radio_subject_set_int_async(&radio_cw_pitch_hz_subject, hz);
+    ESP_LOGI(TAG, "EX040 CW pitch index %d -> %d Hz", value, hz);
 }
 
-// Handle EX053: FM mic gain (1-3)
+// Handle EX053: FM mic gain (0-3, spec says 1-3 but radio may report 0)
 static void parse_ex053_fm_mic_gain(int value) {
-    if (value < 1 || value > 3) {
-        ESP_LOGW(TAG, "Invalid EX053 value: %d (expected 1-3)", value);
+    if (value < 0 || value > 3) {
+        ESP_LOGW(TAG, "Invalid EX053 value: %d (expected 0-3)", value);
         return;
     }
 
