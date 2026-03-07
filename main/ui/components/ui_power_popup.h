@@ -37,6 +37,7 @@ typedef enum {
     UI_CONTROL_RIT_XIT_OFFSET = 13,    // RIT/XIT offset -9999 to +9999 Hz
     UI_CONTROL_DATA_MODE = 14,         // Data mode toggle 0=OFF, 1=ON
     UI_CONTROL_CW_CARRIER_LEVEL = 15,  // CW carrier output level 0-100%
+    UI_CONTROL_KEYING_SPEED = 16,      // CW keying speed 4-60 WPM
 } ui_control_type_t;
 
 /**

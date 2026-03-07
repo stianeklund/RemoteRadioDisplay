@@ -217,6 +217,10 @@ void ui_power_popup_show(ui_control_type_t type, int initial_value)
             min_value = 0;  // CW carrier level: 0-100%
             max_value = 100;
             break;
+        case UI_CONTROL_KEYING_SPEED:
+            min_value = 4;   // CW keying speed: 4-60 WPM
+            max_value = 60;
+            break;
         default:
             ESP_LOGW(TAG, "Unknown control type: %d", type);
             return;
@@ -381,6 +385,7 @@ static const char *get_title_for_control(ui_control_type_t type)
         case UI_CONTROL_RIT_XIT_OFFSET:    return "RIT/XIT";
         case UI_CONTROL_DATA_MODE:         return "Data Mode";
         case UI_CONTROL_CW_CARRIER_LEVEL:  return "CW Carrier";
+        case UI_CONTROL_KEYING_SPEED:      return "CW Speed";
         default:                       return "Setting";
     }
 }
@@ -403,6 +408,7 @@ static const char *get_hint_for_control(ui_control_type_t type)
         case UI_CONTROL_RIT_XIT_OFFSET:    return "+/- 9999 Hz | CLR to reset";
         case UI_CONTROL_DATA_MODE:         return "Touch or MULTI to toggle";
         case UI_CONTROL_CW_CARRIER_LEVEL:  return "0-100% | MULTI to adjust";
+        case UI_CONTROL_KEYING_SPEED:      return "4-60 WPM | MULTI to adjust";
         default:                       return "MULTI to adjust";
     }
 }
@@ -414,6 +420,7 @@ static const char *get_unit_for_control(ui_control_type_t type)
         case UI_CONTROL_IF_SHIFT:      return " Hz";
         case UI_CONTROL_RIT_XIT_OFFSET: return " Hz";
         case UI_CONTROL_CW_CARRIER_LEVEL: return "%";
+        case UI_CONTROL_KEYING_SPEED:    return " WPM";
         default:                       return "";
     }
 }

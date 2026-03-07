@@ -2841,6 +2841,17 @@ void parse_cat_command(const char *response) {
                     // Show popup if not visible
                     ui_power_popup_show(UI_CONTROL_CW_CARRIER_LEVEL, value);
                 }
+            } else if (response[2] == 'K' && response[3] == 'S') {
+                // UIKS - CW Keying Speed (4-60 WPM)
+                int value = atoi(response + 4);
+                ESP_LOGI(TAG, "UIKS received: value=%d WPM", value);
+                if (ui_power_popup_is_visible() &&
+                    ui_power_popup_get_type() == UI_CONTROL_KEYING_SPEED) {
+                    ui_power_popup_set_value(value);
+                } else if (value >= 4 && value <= 60) {
+                    // Show popup if not visible
+                    ui_power_popup_show(UI_CONTROL_KEYING_SPEED, value);
+                }
             } else if (response[2] == 'R' && response[3] == 'L') {
                 // UIRL - NR1 Level
                 int value = atoi(response + 4);
