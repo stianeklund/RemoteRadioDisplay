@@ -324,14 +324,24 @@ void cat_polling_update_ai_mode(cat_ai_mode_t mode) {
 
     ESP_LOGI(TAG, "AI mode updated to: %d", mode);
     g_polling_state.ai_mode = mode;
-    
+
+    // Auto-set expected_ai_mode if not yet established (e.g. during boot).
+    // This enables mismatch recovery and AI status monitoring from the first
+    // AI response, not only after the user presses the AI button.
+    if (g_polling_state.expected_ai_mode == AI_MODE_UNKNOWN &&
+        (mode == AI_MODE_ON || mode == AI_MODE_ON_BACKUP)) {
+        ESP_LOGI(TAG, "Auto-setting expected AI mode to %d (first AI response)", mode);
+        g_polling_state.expected_ai_mode = mode;
+        start_ai_status_monitoring();
+    }
+
     // Check for AI mode mismatch if we have an expected mode set
-    if (g_polling_state.expected_ai_mode != AI_MODE_UNKNOWN && 
+    if (g_polling_state.expected_ai_mode != AI_MODE_UNKNOWN &&
         g_polling_state.expected_ai_mode != mode &&
         (g_polling_state.expected_ai_mode == AI_MODE_ON || g_polling_state.expected_ai_mode == AI_MODE_ON_BACKUP)) {
-        ESP_LOGW(TAG, "AI mode mismatch detected! Expected: %d, Actual: %d. Attempting recovery.", 
+        ESP_LOGW(TAG, "AI mode mismatch detected! Expected: %d, Actual: %d. Attempting recovery.",
                  g_polling_state.expected_ai_mode, mode);
-        
+
         // Attempt to restore expected AI mode
         char recovery_cmd[8];
         snprintf(recovery_cmd, sizeof(recovery_cmd), "AI%d;", g_polling_state.expected_ai_mode);
