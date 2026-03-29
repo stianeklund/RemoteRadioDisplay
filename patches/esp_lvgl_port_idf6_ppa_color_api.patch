@@ -1,0 +1,28 @@
+IDF 6.0 compat: color_space_t, COLOR_TYPE_ID(), COLOR_SPACE_*, COLOR_PIXEL_*
+were removed. Replace with ppa_srm_color_mode_t and PPA_SRM_COLOR_MODE_* enums.
+
+--- a/src/common/ppa/lcd_ppa.h
++++ b/src/common/ppa/lcd_ppa.h
+@@ -27,2 +27,1 @@
+-    color_space_t   color_space;  /*!< Color space of input/output data */
+-    uint32_t        pixel_format; /*!< Pixel format of input/output data */
++    ppa_srm_color_mode_t srm_cm;  /*!< PPA SRM color mode (e.g. PPA_SRM_COLOR_MODE_RGB565) */
+
+--- a/src/common/ppa/lcd_ppa.c
++++ b/src/common/ppa/lcd_ppa.c
+@@ -74,1 +74,1 @@
+-    ppa_ctx->color_type_id = COLOR_TYPE_ID(cfg->color_space, cfg->pixel_format);
++    ppa_ctx->color_type_id = cfg->srm_cm;
+
+--- a/src/lvgl9/esp_lvgl_port_disp.c
++++ b/src/lvgl9/esp_lvgl_port_disp.c
+@@ -401,3 +401,3 @@
+-        uint32_t pixel_format = COLOR_PIXEL_RGB565;
++        ppa_srm_color_mode_t srm_cm = PPA_SRM_COLOR_MODE_RGB565;
+         if (disp_cfg->color_format == LV_COLOR_FORMAT_RGB888) {
+-            pixel_format = COLOR_PIXEL_RGB888;
++            srm_cm = PPA_SRM_COLOR_MODE_RGB888;
+@@ -409,2 +409,1 @@
+-            .color_space = COLOR_SPACE_RGB,
+-            .pixel_format = pixel_format,
++            .srm_cm = srm_cm,

@@ -73,11 +73,12 @@ set(COMPONENT_REQUIRES
     "esp_timer"
     "esp_hw_support"
     "mdns"
-    "json"
+    "espressif__cjson"
     "esp_lcd"
     "espressif__esp_lcd_touch"
     "lvgl__lvgl"
     "espressif__esp_websocket_client"
+    "esp_driver_uart"
 )
 
 # Target-specific dependencies
@@ -108,3 +109,10 @@ list(APPEND COMPONENT_REQUIRES
 idf_component_register(SRCS ${SOURCES}
                     INCLUDE_DIRS ${INCLUDE_DIRS}
                     REQUIRES ${COMPONENT_REQUIRES})
+
+# Suppress warnings promoted to errors by newer GCC in ESP-IDF:
+# - missing-field-initializers: valid {0} zero-init and partial designated initializers
+# - deprecated-enum-enum-conversion: LVGL's LV_PART_x | LV_STATE_x pattern in generated UI code (C++ only)
+target_compile_options(${COMPONENT_LIB} PRIVATE
+    -Wno-missing-field-initializers
+    $<$<COMPILE_LANGUAGE:CXX>:-Wno-deprecated-enum-enum-conversion>)

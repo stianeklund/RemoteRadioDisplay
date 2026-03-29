@@ -214,7 +214,8 @@ esp_err_t lcd_init(esp_lcd_panel_handle_t *panel_handle)
     dpi_config.dpi_clk_src = MIPI_DSI_DPI_CLK_SRC_DEFAULT;
     dpi_config.dpi_clock_freq_mhz = 58;
     dpi_config.virtual_channel = 0;
-    dpi_config.pixel_format = LCD_COLOR_PIXEL_FORMAT_RGB565;
+    dpi_config.in_color_format = LCD_COLOR_FMT_RGB565;
+    dpi_config.out_color_format = LCD_COLOR_FMT_RGB565;
     dpi_config.num_fbs = 1;
     dpi_config.video_timing.h_size = DSI_LCD_H_RES;
     dpi_config.video_timing.v_size = DSI_LCD_V_RES;
@@ -224,7 +225,6 @@ esp_err_t lcd_init(esp_lcd_panel_handle_t *panel_handle)
     dpi_config.video_timing.vsync_back_porch = 10;
     dpi_config.video_timing.vsync_pulse_width = 4;
     dpi_config.video_timing.vsync_front_porch = 24;
-    dpi_config.flags.use_dma2d = true;
 
     // Step 5: Create HX8394 panel with vendor-specific init sequence
     hx8394_vendor_config_t vendor_config = {

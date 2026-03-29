@@ -1,0 +1,8 @@
+IDF 6.0 compat: esp_lcd_panel_dev_config_t.color_space was renamed to rgb_ele_order.
+The enum values LCD_RGB_ELEMENT_ORDER_RGB/BGR are unchanged.
+
+--- a/esp_lcd_hx8394.c
++++ b/esp_lcd_hx8394.c
+@@ -72,1 +72,1 @@
+-    switch (panel_dev_config->color_space)
++    switch (panel_dev_config->rgb_ele_order)

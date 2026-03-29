@@ -6,6 +6,7 @@ dependencies:
   lvgl/lvgl: ^9.2.0
   espressif/esp_lvgl_port: ^2.4.0
   idf: '>=5.5'
+  espressif/cjson: '*'
   espressif/esp_lcd_touch_gt911: '>=1.1.0'
   espressif/esp_websocket_client: '>=1.0.0'
   espressif/mdns: '*'
