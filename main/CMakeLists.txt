@@ -79,6 +79,7 @@ set(COMPONENT_REQUIRES
     "lvgl__lvgl"
     "espressif__esp_websocket_client"
     "esp_driver_uart"
+    "esp_driver_ledc"
 )
 
 # Target-specific dependencies

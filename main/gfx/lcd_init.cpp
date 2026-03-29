@@ -75,40 +75,36 @@ esp_err_t lcd_init(esp_lcd_panel_handle_t *panel_handle)
     esp_lcd_rgb_panel_config_t panel_config = {};
     panel_config.clk_src = LCD_CLK_SRC_PLL160M;
     panel_config.data_width = 16;
-    panel_config.bits_per_pixel = 16;
-    panel_config.sram_trans_align = 8;
-#if ESP_IDF_VERSION < ESP_IDF_VERSION_VAL(5, 3, 0)
-    panel_config.psram_trans_align = 64;
-#else
+    panel_config.in_color_format = LCD_COLOR_FMT_RGB565;
+    panel_config.out_color_format = LCD_COLOR_FMT_RGB565;
     panel_config.dma_burst_size = 64;
-#endif
     panel_config.num_fbs = 2;
 #if LCD_RGB_BOUNCE_BUFFER_HEIGHT > 0
     panel_config.bounce_buffer_size_px = H_RES * LCD_RGB_BOUNCE_BUFFER_HEIGHT;
 #else
     panel_config.bounce_buffer_size_px = 0;
 #endif
-    panel_config.hsync_gpio_num = HSYNC_PIN_NUM;
-    panel_config.vsync_gpio_num = VSYNC_PIN_NUM;
-    panel_config.de_gpio_num = DE_PIN_NUM;
-    panel_config.pclk_gpio_num = PCLK_PIN_NUM;
-    panel_config.disp_gpio_num = DISP_PIN_NUM;
-    panel_config.data_gpio_nums[0] = DATA00_PIN_NUM;
-    panel_config.data_gpio_nums[1] = DATA01_PIN_NUM;
-    panel_config.data_gpio_nums[2] = DATA02_PIN_NUM;
-    panel_config.data_gpio_nums[3] = DATA03_PIN_NUM;
-    panel_config.data_gpio_nums[4] = DATA04_PIN_NUM;
-    panel_config.data_gpio_nums[5] = DATA05_PIN_NUM;
-    panel_config.data_gpio_nums[6] = DATA06_PIN_NUM;
-    panel_config.data_gpio_nums[7] = DATA07_PIN_NUM;
-    panel_config.data_gpio_nums[8] = DATA08_PIN_NUM;
-    panel_config.data_gpio_nums[9] = DATA09_PIN_NUM;
-    panel_config.data_gpio_nums[10] = DATA10_PIN_NUM;
-    panel_config.data_gpio_nums[11] = DATA11_PIN_NUM;
-    panel_config.data_gpio_nums[12] = DATA12_PIN_NUM;
-    panel_config.data_gpio_nums[13] = DATA13_PIN_NUM;
-    panel_config.data_gpio_nums[14] = DATA14_PIN_NUM;
-    panel_config.data_gpio_nums[15] = DATA15_PIN_NUM;
+    panel_config.hsync_gpio_num = static_cast<gpio_num_t>(HSYNC_PIN_NUM);
+    panel_config.vsync_gpio_num = static_cast<gpio_num_t>(VSYNC_PIN_NUM);
+    panel_config.de_gpio_num = static_cast<gpio_num_t>(DE_PIN_NUM);
+    panel_config.pclk_gpio_num = static_cast<gpio_num_t>(PCLK_PIN_NUM);
+    panel_config.disp_gpio_num = static_cast<gpio_num_t>(DISP_PIN_NUM);
+    panel_config.data_gpio_nums[0] = static_cast<gpio_num_t>(DATA00_PIN_NUM);
+    panel_config.data_gpio_nums[1] = static_cast<gpio_num_t>(DATA01_PIN_NUM);
+    panel_config.data_gpio_nums[2] = static_cast<gpio_num_t>(DATA02_PIN_NUM);
+    panel_config.data_gpio_nums[3] = static_cast<gpio_num_t>(DATA03_PIN_NUM);
+    panel_config.data_gpio_nums[4] = static_cast<gpio_num_t>(DATA04_PIN_NUM);
+    panel_config.data_gpio_nums[5] = static_cast<gpio_num_t>(DATA05_PIN_NUM);
+    panel_config.data_gpio_nums[6] = static_cast<gpio_num_t>(DATA06_PIN_NUM);
+    panel_config.data_gpio_nums[7] = static_cast<gpio_num_t>(DATA07_PIN_NUM);
+    panel_config.data_gpio_nums[8] = static_cast<gpio_num_t>(DATA08_PIN_NUM);
+    panel_config.data_gpio_nums[9] = static_cast<gpio_num_t>(DATA09_PIN_NUM);
+    panel_config.data_gpio_nums[10] = static_cast<gpio_num_t>(DATA10_PIN_NUM);
+    panel_config.data_gpio_nums[11] = static_cast<gpio_num_t>(DATA11_PIN_NUM);
+    panel_config.data_gpio_nums[12] = static_cast<gpio_num_t>(DATA12_PIN_NUM);
+    panel_config.data_gpio_nums[13] = static_cast<gpio_num_t>(DATA13_PIN_NUM);
+    panel_config.data_gpio_nums[14] = static_cast<gpio_num_t>(DATA14_PIN_NUM);
+    panel_config.data_gpio_nums[15] = static_cast<gpio_num_t>(DATA15_PIN_NUM);
     panel_config.timings.pclk_hz = PIXEL_CLOCK_HZ;
     panel_config.timings.h_res = H_RES;
     panel_config.timings.v_res = V_RES;
