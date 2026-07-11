@@ -393,30 +393,52 @@ esp_err_t antenna_update_status_from_server(uint8_t current_antenna, const uint8
         return ESP_ERR_INVALID_STATE;
     }
 
+    // Compute the new state into a scratch copy so we can detect real changes.
+    // Notifying unconditionally creates a feedback loop: the UI observer re-requests
+    // status on every notification, and each response lands back here.
+    antenna_system_state_t next = g_antenna_state;
+
     // Update active antenna
     if (current_antenna <= MAX_ANTENNA_RELAYS) {
-        g_antenna_state.active_antenna = current_antenna;
+        next.active_antenna = current_antenna;
     }
 
     // Update relay states based on active antenna
     for (int i = 0; i < MAX_ANTENNA_RELAYS; i++) {
-        g_antenna_state.antennas[i].state = ((i + 1) == current_antenna);
+        next.antennas[i].state = ((i + 1) == current_antenna);
     }
 
     // Update availability based on available array
     if (available && count > 0) {
         // First mark all as unavailable
         for (int i = 0; i < MAX_ANTENNA_RELAYS; i++) {
-            g_antenna_state.antennas[i].available = false;
+            next.antennas[i].available = false;
         }
         // Then mark available ones
         for (int i = 0; i < count && i < MAX_ANTENNA_RELAYS; i++) {
             uint8_t id = available[i];
             if (id >= 1 && id <= MAX_ANTENNA_RELAYS) {
-                g_antenna_state.antennas[id - 1].available = true;
+                next.antennas[id - 1].available = true;
             }
         }
     }
+
+    // Only publish when something actually changed. active_antenna + per-antenna
+    // state/available together capture everything the UI renders from this path.
+    bool changed = (next.active_antenna != g_antenna_state.active_antenna);
+    for (int i = 0; i < MAX_ANTENNA_RELAYS && !changed; i++) {
+        if (next.antennas[i].state != g_antenna_state.antennas[i].state ||
+            next.antennas[i].available != g_antenna_state.antennas[i].available) {
+            changed = true;
+        }
+    }
+
+    if (!changed) {
+        ESP_LOGV(TAG, "Status from server unchanged (active=%d) - not notifying", current_antenna);
+        return ESP_OK;
+    }
+
+    g_antenna_state = next;
 
     ESP_LOGD(TAG, "Status updated from server: active=%d, available_count=%d", current_antenna, count);
 

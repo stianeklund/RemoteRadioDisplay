@@ -979,16 +979,25 @@ static void ui_update_antenna_button_labels(void)
 
 // Core antenna state update logic (for relay changes)
 static void ui_handle_antenna_state_changed(void) {
-    // Request fresh antenna status to update all button states correctly
-    // This ensures the UI reflects the true system state after relay changes
-    if (websocket_client_is_connected()) {
-        ESP_LOGD("UI_Antennas", "Requesting fresh antenna status after relay change");
-        websocket_client_get_status();
-    } else {
-        ESP_LOGW("UI_Antennas", "WebSocket not connected - cannot refresh antenna status");
-        // If WebSocket is not connected, clear the antenna cache to force UI refresh next time
-        g_antenna_cache.cache_valid = false;
+    // Render the button states directly from the already-updated system state.
+    // Do NOT re-request status here: the server pushes full status on every change,
+    // and requesting it from this observer (which fires *because* of a server-pushed
+    // update) creates a self-feeding poll loop.
+    antenna_system_state_t state;
+    if (antenna_get_system_state(&state) != ESP_OK) {
+        ESP_LOGW("UI_Antennas", "Could not read antenna state - skipping UI refresh");
+        return;
     }
+
+    uint8_t available_antennas[8] = {0};
+    int available_count = 0;
+    for (int i = 0; i < MAX_ANTENNA_RELAYS && available_count < 8; i++) {
+        if (state.antennas[i].available) {
+            available_antennas[available_count++] = (uint8_t)(i + 1);
+        }
+    }
+
+    ui_update_antenna_button_states(state.active_antenna, available_antennas, available_count);
 }
 
 // Core antenna names update logic
