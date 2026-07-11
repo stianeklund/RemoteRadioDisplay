@@ -69,9 +69,32 @@ static void lvgl_subject_drain_cb(lv_timer_t *timer) {
     (void) timer;
     int processed = radio_subject_drain_updates();
     // DIAG: Log when unusually large batches are processed (debug level, high threshold)
-    if (processed >= 50) {
-        ESP_LOGD("MAIN", "[DIAG] Subject drain: %d items", processed);
+    if (processed >= 24) {
+        ESP_LOGD("MAIN", "[DIAG] Subject drain: %d items, %d pending",
+                 processed, radio_subject_pending_count());
     }
+}
+
+static void pipeline_diagnostics_cb(lv_timer_t *timer) {
+    (void) timer;
+    const uart_pipeline_queue_stats_t tx = uart_reset_tx_queue_stats();
+    const uart_pipeline_queue_stats_t parser = uart_reset_parser_queue_stats();
+    const radio_subject_queue_stats_t subjects = radio_subject_reset_queue_stats();
+
+    ESP_LOGI("PIPELINE",
+             "TXQ depth=%lu hw=%lu deq=%lu age(avg=%lluus max=%lluus) drop=%lu | "
+             "ParserQ depth=%lu hw=%lu deq=%lu age(avg=%lluus max=%lluus) drop=%lu",
+             (unsigned long)tx.current_depth, (unsigned long)tx.high_watermark,
+             (unsigned long)tx.dequeued, (unsigned long long)tx.avg_age_us,
+             (unsigned long long)tx.max_age_us, (unsigned long)tx.dropped,
+             (unsigned long)parser.current_depth, (unsigned long)parser.high_watermark,
+             (unsigned long)parser.dequeued, (unsigned long long)parser.avg_age_us,
+             (unsigned long long)parser.max_age_us, (unsigned long)parser.dropped);
+    ESP_LOGI("PIPELINE",
+             "SubjectQ depth=%lu hw=%lu processed=%lu age(avg=%lluus max=%lluus) drop=%lu",
+             (unsigned long)subjects.current_depth, (unsigned long)subjects.high_watermark,
+             (unsigned long)subjects.processed, (unsigned long long)subjects.avg_age_us,
+             (unsigned long long)subjects.max_age_us, (unsigned long)subjects.dropped);
 }
 
 void monitoring_task(void *pvParameters);
@@ -219,6 +242,8 @@ extern "C" void app_main(void) {
     // Runs at 200Hz (5ms) for minimal latency on VFO updates from CAT parser, websocket, etc.
     lv_timer_create(lvgl_subject_drain_cb, 5, NULL);
     ESP_LOGI(TAG, "LVGL subject drain timer created (200Hz)");
+    lv_timer_create(pipeline_diagnostics_cb, 10000, NULL);
+    ESP_LOGI(TAG, "Pipeline diagnostics timer created (10s)");
 
     // Time client (NTP/GPS) initialization will now be handled by time_sync_task
     // to allow concurrent startup with UART.

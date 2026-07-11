@@ -11,6 +11,7 @@
 #include "task_handles.h" // For task handle getter declarations
 #include "memory_monitor.h" // For hardware health monitoring
 #include "esp_timer.h" // For timestamp monitoring
+#include <atomic>
 
 #define BUF_SIZE (4096)  // Increased from 1024 to prevent interrupt watchdog timeouts
 static const char *TAG = "UART";
@@ -45,6 +46,7 @@ static const uart_port_t s_uart_port = UART_NUM_1; // Fallback
 #define UART_TX_TASK_STACK_SIZE 4096
 #define UART_TX_TASK_PRIORITY 5
 #define UART_TX_QUEUE_SIZE 20
+#define COMMAND_BUFFER_SIZE 64
 
 static QueueHandle_t uart_tx_queue = NULL;
 static TaskHandle_t uart_tx_task_handle = NULL; // Handle for the UART TX task
@@ -54,7 +56,58 @@ static TaskHandle_t uart_tx_task_handle = NULL; // Handle for the UART TX task
 typedef struct {
     char data[UART_TX_MESSAGE_BUFFER_SIZE];
     size_t len;
+    int64_t queued_at_us;
 } uart_tx_item_t;
+
+typedef struct {
+    char data[COMMAND_BUFFER_SIZE];
+    int64_t queued_at_us;
+} cat_cmd_item_t;
+
+struct queue_metrics_t {
+    std::atomic<uint32_t> high_watermark{0};
+    std::atomic<uint32_t> dropped{0};
+    std::atomic<uint32_t> dequeued{0};
+    std::atomic<uint64_t> total_age_us{0};
+    std::atomic<uint64_t> max_age_us{0};
+};
+
+static queue_metrics_t s_tx_metrics;
+static queue_metrics_t s_parser_metrics;
+
+static void update_max(std::atomic<uint64_t>& target, uint64_t value) {
+    uint64_t previous = target.load(std::memory_order_relaxed);
+    while (value > previous &&
+           !target.compare_exchange_weak(previous, value, std::memory_order_relaxed)) {}
+}
+
+static void update_high_watermark(queue_metrics_t& metrics, uint32_t depth) {
+    uint32_t previous = metrics.high_watermark.load(std::memory_order_relaxed);
+    while (depth > previous &&
+           !metrics.high_watermark.compare_exchange_weak(previous, depth, std::memory_order_relaxed)) {}
+}
+
+static void record_dequeue_age(queue_metrics_t& metrics, int64_t queued_at_us) {
+    if (queued_at_us <= 0) return;
+    const int64_t age = esp_timer_get_time() - queued_at_us;
+    if (age < 0) return;
+    const uint64_t age_us = static_cast<uint64_t>(age);
+    metrics.total_age_us.fetch_add(age_us, std::memory_order_relaxed);
+    metrics.dequeued.fetch_add(1, std::memory_order_relaxed);
+    update_max(metrics.max_age_us, age_us);
+}
+
+static uart_pipeline_queue_stats_t reset_metrics(queue_metrics_t& metrics, QueueHandle_t queue) {
+    uart_pipeline_queue_stats_t result = {};
+    result.high_watermark = metrics.high_watermark.exchange(0, std::memory_order_relaxed);
+    result.dropped = metrics.dropped.exchange(0, std::memory_order_relaxed);
+    result.dequeued = metrics.dequeued.exchange(0, std::memory_order_relaxed);
+    const uint64_t total_age = metrics.total_age_us.exchange(0, std::memory_order_relaxed);
+    result.max_age_us = metrics.max_age_us.exchange(0, std::memory_order_relaxed);
+    result.avg_age_us = result.dequeued > 0 ? total_age / result.dequeued : 0;
+    result.current_depth = queue != NULL ? static_cast<uint32_t>(uxQueueMessagesWaiting(queue)) : 0;
+    return result;
+}
 
 esp_err_t init_uart() {
     ESP_LOGI(TAG, "Initializing UART: port=%d tx=%d rx=%d baud=%d", s_uart_port, CAT_UART_TX_PIN, CAT_UART_RX_PIN, CONFIG_CAT_UART_BAUD);
@@ -134,6 +187,7 @@ void uart_tx_task(void *pvParameters) {
         // **DEADLOCK PREVENTION**: Use shorter timeouts and monitor queue activity
         if (xQueueReceive(uart_tx_queue, &tx_item, pdMS_TO_TICKS(100))) {  // Reduced to 100ms for better responsiveness
             consecutive_empty_cycles = 0; // Reset counter on successful receive
+            record_dequeue_age(s_tx_metrics, tx_item.queued_at_us);
             
             // Feed watchdog before potentially blocking UART write
             feed_watchdog();
@@ -196,12 +250,16 @@ esp_err_t uart_write_message(const char *message) {
     tx_item.data[original_len+2] = '\0'; // Null terminate for safety, though len is used for sending
 
     tx_item.len = original_len + 2; // The actual length of the string to send
+    tx_item.queued_at_us = esp_timer_get_time();
 
     if (xQueueSend(uart_tx_queue, &tx_item, pdMS_TO_TICKS(100)) != pdPASS) {
+        s_tx_metrics.dropped.fetch_add(1, std::memory_order_relaxed);
         ESP_LOGE(TAG, "Failed to queue UART message: %s", message);
         // No free(data) needed here as it's stack-allocated within tx_item
         return ESP_FAIL;
     }
+
+    update_high_watermark(s_tx_metrics, static_cast<uint32_t>(uxQueueMessagesWaiting(uart_tx_queue)));
 
     return ESP_OK;
 }
@@ -222,7 +280,6 @@ void uart_write_message_handler(void *arg, void *data) {
     }
 }
 #define READ_BUFFER_SIZE 256
-#define COMMAND_BUFFER_SIZE 64
 #define CAT_CMD_TIMEOUT_MS 50   // Optimized from 100ms to 50ms for better responsiveness
 
 // Create a command processing queue to offload parsing from the UART task
@@ -235,7 +292,7 @@ void cat_parser_task(void *pvParameters) {
     // Add this task to watchdog
     ESP_ERROR_CHECK(esp_task_wdt_add(NULL));
     
-    char cmd_buffer[COMMAND_BUFFER_SIZE];
+    cat_cmd_item_t cmd_item = {};
     
     while (1) {
         // Feed watchdog before blocking operations
@@ -245,15 +302,17 @@ void cat_parser_task(void *pvParameters) {
         
         // Stack monitoring removed for performance
         // OPTIMIZED: Reduced timeout and batch processing for better responsiveness
-        if (xQueueReceive(cat_cmd_queue, cmd_buffer, pdMS_TO_TICKS(25))) {  // Further reduced to 25ms for batch processing
+        if (xQueueReceive(cat_cmd_queue, &cmd_item, pdMS_TO_TICKS(25))) {  // Further reduced to 25ms for batch processing
+            record_dequeue_age(s_parser_metrics, cmd_item.queued_at_us);
             // Process the command with minimal overhead
-            parse_cat_command(cmd_buffer);
+            parse_cat_command(cmd_item.data);
             
             // OPTIMIZATION: Process up to 5 additional commands in batch if available
             // This reduces context switching during high-frequency CAT operations
             int batch_count = 0;
-            while (batch_count < 5 && xQueueReceive(cat_cmd_queue, cmd_buffer, 0) == pdTRUE) {
-                parse_cat_command(cmd_buffer);
+            while (batch_count < 5 && xQueueReceive(cat_cmd_queue, &cmd_item, 0) == pdTRUE) {
+                record_dequeue_age(s_parser_metrics, cmd_item.queued_at_us);
+                parse_cat_command(cmd_item.data);
                 batch_count++;
             }
         }
@@ -287,7 +346,7 @@ void read_uart(void *pvParameters) {
     if (cat_cmd_queue == NULL) {
         // Increased queue size from 10 to 50 to handle high-frequency CAT command bursts
         // This prevents dropping commands during rapid frequency updates and S-meter readings
-        cat_cmd_queue = xQueueCreate(50, COMMAND_BUFFER_SIZE);
+        cat_cmd_queue = xQueueCreate(50, sizeof(cat_cmd_item_t));
         if (cat_cmd_queue == NULL) {
             ESP_LOGE(TAG, "Failed to create CAT command queue - Free heap: %lu bytes", esp_get_free_heap_size());
             esp_task_wdt_delete(NULL); // Remove from watchdog before exiting
@@ -462,20 +521,36 @@ void read_uart(void *pvParameters) {
                     cmd_buffer[cmd_index] = '\0';
                     
                     // OPTIMIZED: Simplified queue logic with fast path for common case
-                    if (xQueueSend(cat_cmd_queue, cmd_buffer, 0) != pdPASS) {
+                    cat_cmd_item_t cmd_item = {};
+                    memcpy(cmd_item.data, cmd_buffer, static_cast<size_t>(cmd_index) + 1);
+                    cmd_item.queued_at_us = esp_timer_get_time();
+                    if (xQueueSend(cat_cmd_queue, &cmd_item, 0) != pdPASS) {
                         // OPTIMIZED: Fast queue overflow handling - simple drop strategy
                         // Check only first 2 chars for priority (much faster than full strncmp)
                         if (cmd_buffer[0] == 'I' && cmd_buffer[1] == 'F') {
                             // IF commands are critical - try once to make room
-                            char dropped_cmd[COMMAND_BUFFER_SIZE];
-                            if (xQueueReceive(cat_cmd_queue, dropped_cmd, 0) == pdPASS) {
-                                xQueueSend(cat_cmd_queue, cmd_buffer, 0);  // Try to queue IF command
+                            cat_cmd_item_t dropped_cmd = {};
+                            if (xQueueReceive(cat_cmd_queue, &dropped_cmd, 0) == pdPASS) {
+                                s_parser_metrics.dropped.fetch_add(1, std::memory_order_relaxed);
+                                if (xQueueSend(cat_cmd_queue, &cmd_item, 0) != pdPASS) {
+                                    s_parser_metrics.dropped.fetch_add(1, std::memory_order_relaxed);
+                                } else {
+                                    update_high_watermark(
+                                        s_parser_metrics,
+                                        static_cast<uint32_t>(uxQueueMessagesWaiting(cat_cmd_queue)));
+                                }
+                            } else {
+                                s_parser_metrics.dropped.fetch_add(1, std::memory_order_relaxed);
                             }
                             // Don't log - too expensive during high-frequency operations
+                        } else {
+                            // For all other commands when queue full: drop the new command.
+                            s_parser_metrics.dropped.fetch_add(1, std::memory_order_relaxed);
                         }
-                        // For all other commands when queue full: just drop silently for performance
-                        // This prevents expensive priority checking and multiple queue operations
-                        }
+                    } else {
+                        update_high_watermark(s_parser_metrics,
+                                              static_cast<uint32_t>(uxQueueMessagesWaiting(cat_cmd_queue)));
+                    }
                         
                     // OPTIMIZED: Fast buffer reset - only reset index, no expensive memset
                     cmd_index = 0;
@@ -589,6 +664,14 @@ TaskHandle_t get_read_uart_task_handle(void) {
 
 int uart_get_port(void) {
     return s_uart_port;
+}
+
+uart_pipeline_queue_stats_t uart_reset_tx_queue_stats(void) {
+    return reset_metrics(s_tx_metrics, uart_tx_queue);
+}
+
+uart_pipeline_queue_stats_t uart_reset_parser_queue_stats(void) {
+    return reset_metrics(s_parser_metrics, cat_cmd_queue);
 }
 
 bool uart_is_ready(void) {

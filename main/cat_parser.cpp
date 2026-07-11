@@ -849,18 +849,6 @@ static void update_frequency_displays(int rx_vfo_function, int tx_vfo_function, 
         return; // No change, skip message send
     }
 
-    // Rate-limit frequency updates to avoid flooding the message queue
-    static uint32_t last_freq_update_time = 0;
-    const uint32_t MIN_FREQ_UPDATE_INTERVAL_MS = 16; // ~60Hz - aligns with 2x LVGL refresh (30 FPS)
-    uint32_t current_time = esp_timer_get_time() / 1000;
-    if (current_time - last_freq_update_time < MIN_FREQ_UPDATE_INTERVAL_MS) {
-#if FREQ_UPDATE_STATS_ENABLED
-        g_freq_stats.throttled_count++;
-#endif
-        return; // Throttle updates
-    }
-    last_freq_update_time = current_time;
-
     // Update deduplication state
     s_last_active_freq = active_freq;
     s_last_inactive_freq = inactive_freq;

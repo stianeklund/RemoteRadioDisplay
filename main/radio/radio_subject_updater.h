@@ -39,6 +39,15 @@ typedef enum {
     SUBJECT_UPDATE_NOTIFY,   /**< Notify POINTER subject (data already in buffer) */
 } subject_update_type_t;
 
+typedef struct {
+    uint32_t high_watermark;
+    uint32_t dropped;
+    uint32_t processed;
+    uint32_t current_depth;
+    uint64_t max_age_us;
+    uint64_t avg_age_us;
+} radio_subject_queue_stats_t;
+
 // ============================================================================
 // Async Update Functions (Thread-Safe)
 // ============================================================================
@@ -140,6 +149,7 @@ int radio_subject_drain_updates(void);
  * @return Number of items in the update queue
  */
 int radio_subject_pending_count(void);
+radio_subject_queue_stats_t radio_subject_reset_queue_stats(void);
 
 #ifdef __cplusplus
 }

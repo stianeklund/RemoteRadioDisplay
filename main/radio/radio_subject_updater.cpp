@@ -11,6 +11,8 @@
 #include "freertos/queue.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
+#include "esp_timer.h"
+#include <atomic>
 #include <string.h>
 #include <inttypes.h>
 
@@ -31,11 +33,38 @@ typedef struct {
         void* heap_ptr;
     } payload;
     uint16_t payload_len;  // For POINTER type
+    int64_t queued_at_us;
 } subject_update_item_t;
 
 // Queue handle
 static QueueHandle_t s_update_queue = NULL;
 static bool s_initialized = false;
+static std::atomic<uint32_t> s_high_watermark{0};
+static std::atomic<uint32_t> s_dropped{0};
+static std::atomic<uint32_t> s_processed{0};
+static std::atomic<uint64_t> s_total_age_us{0};
+static std::atomic<uint64_t> s_max_age_us{0};
+
+static void record_queue_success(void)
+{
+    const uint32_t depth = static_cast<uint32_t>(uxQueueMessagesWaiting(s_update_queue));
+    uint32_t previous = s_high_watermark.load(std::memory_order_relaxed);
+    while (depth > previous &&
+           !s_high_watermark.compare_exchange_weak(previous, depth, std::memory_order_relaxed)) {}
+}
+
+static void record_item_age(int64_t queued_at_us)
+{
+    if (queued_at_us <= 0) return;
+    const int64_t age = esp_timer_get_time() - queued_at_us;
+    if (age < 0) return;
+    const uint64_t age_us = static_cast<uint64_t>(age);
+    s_total_age_us.fetch_add(age_us, std::memory_order_relaxed);
+    s_processed.fetch_add(1, std::memory_order_relaxed);
+    uint64_t previous = s_max_age_us.load(std::memory_order_relaxed);
+    while (age_us > previous &&
+           !s_max_age_us.compare_exchange_weak(previous, age_us, std::memory_order_relaxed)) {}
+}
 
 // Lazy initialization of queue
 static bool ensure_queue_initialized(void)
@@ -71,11 +100,14 @@ bool radio_subject_set_int_async(lv_subject_t* subject, int32_t value)
     item.type = SUBJECT_UPDATE_INT;
     item.flags = 0;
     item.payload.int_value = value;
+    item.queued_at_us = esp_timer_get_time();
 
     if (xQueueSendToBack(s_update_queue, &item, 0) != pdPASS) {
+        s_dropped.fetch_add(1, std::memory_order_relaxed);
         ESP_LOGD(TAG, "Subject update queue full (INT)");
         return false;
     }
+    record_queue_success();
     return true;
 }
 
@@ -91,11 +123,14 @@ bool radio_subject_set_float_async(lv_subject_t* subject, float value)
     item.type = SUBJECT_UPDATE_FLOAT;
     item.flags = 0;
     item.payload.float_value = value;
+    item.queued_at_us = esp_timer_get_time();
 
     if (xQueueSendToBack(s_update_queue, &item, 0) != pdPASS) {
+        s_dropped.fetch_add(1, std::memory_order_relaxed);
         ESP_LOGD(TAG, "Subject update queue full (FLOAT)");
         return false;
     }
+    record_queue_success();
     return true;
 #else
     (void)subject;
@@ -120,6 +155,7 @@ bool radio_subject_set_pointer_async(lv_subject_t* subject, const void* data, si
     item.subject = subject;
     item.type = SUBJECT_UPDATE_POINTER;
     item.payload_len = (uint16_t)len;
+    item.queued_at_us = esp_timer_get_time();
 
     if (len <= INLINE_PAYLOAD_SIZE) {
         // Inline copy
@@ -142,6 +178,7 @@ bool radio_subject_set_pointer_async(lv_subject_t* subject, const void* data, si
     }
 
     if (xQueueSendToBack(s_update_queue, &item, 0) != pdPASS) {
+        s_dropped.fetch_add(1, std::memory_order_relaxed);
         // Free heap payload if queue is full
         if (item.flags & 0x01) {
             heap_caps_free(item.payload.heap_ptr);
@@ -149,6 +186,7 @@ bool radio_subject_set_pointer_async(lv_subject_t* subject, const void* data, si
         ESP_LOGD(TAG, "Subject update queue full (POINTER)");
         return false;
     }
+    record_queue_success();
     return true;
 }
 
@@ -162,11 +200,14 @@ bool radio_subject_notify_async(lv_subject_t* subject)
     item.subject = subject;
     item.type = SUBJECT_UPDATE_NOTIFY;
     item.flags = 0;
+    item.queued_at_us = esp_timer_get_time();
 
     if (xQueueSendToBack(s_update_queue, &item, 0) != pdPASS) {
+        s_dropped.fetch_add(1, std::memory_order_relaxed);
         ESP_LOGD(TAG, "Subject update queue full (NOTIFY)");
         return false;
     }
+    record_queue_success();
     return true;
 }
 
@@ -223,6 +264,8 @@ int radio_subject_drain_updates(void)
 
     while (processed < MAX_PER_DRAIN &&
            xQueueReceive(s_update_queue, &item, 0) == pdTRUE) {
+
+        record_item_age(item.queued_at_us);
 
         if (item.subject == NULL) {
             // Skip invalid items
@@ -288,4 +331,18 @@ int radio_subject_pending_count(void)
         return 0;
     }
     return (int)uxQueueMessagesWaiting(s_update_queue);
+}
+
+radio_subject_queue_stats_t radio_subject_reset_queue_stats(void)
+{
+    radio_subject_queue_stats_t result = {};
+    result.high_watermark = s_high_watermark.exchange(0, std::memory_order_relaxed);
+    result.dropped = s_dropped.exchange(0, std::memory_order_relaxed);
+    result.processed = s_processed.exchange(0, std::memory_order_relaxed);
+    const uint64_t total_age = s_total_age_us.exchange(0, std::memory_order_relaxed);
+    result.max_age_us = s_max_age_us.exchange(0, std::memory_order_relaxed);
+    result.avg_age_us = result.processed > 0 ? total_age / result.processed : 0;
+    result.current_depth = s_update_queue != NULL
+        ? static_cast<uint32_t>(uxQueueMessagesWaiting(s_update_queue)) : 0;
+    return result;
 }
