@@ -2590,9 +2590,29 @@ void ui_event_AtTuneButton(lv_event_t *e) {
 void ui_event_ProcButton(lv_event_t *e) {
     lv_event_code_t event_code = lv_event_get_code(e);
 
+    if (!lv_obj_is_valid(ui_ProcButton)) return;
+
+    // In CW/CW-R the speech processor (PR) is not useful, so the PROC button is
+    // repurposed as the CW carrier-level control: HOLD to open/close the carrier
+    // popup (adjusted with the ARCI panel MULTI knob). A short tap is inert - it
+    // must not toggle PR and must not latch, so a hold cannot flip PR as a side
+    // effect. The button keeps its normal "PROC" label in every mode.
+    const bool is_cw = (s_current_radio_mode == 3 || s_current_radio_mode == 7);
+    if (is_cw) {
+        if (event_code == LV_EVENT_LONG_PRESSED) {
+            if (ui_power_popup_is_visible() &&
+                ui_power_popup_get_type() == UI_CONTROL_CW_CARRIER_LEVEL) {
+                uart_write_message("UIMN0;");  // dismiss the carrier popup
+            } else {
+                uart_write_message("UICG;");   // ask ARCI to enter CW carrier UI mode
+            }
+        } else if (event_code == LV_EVENT_VALUE_CHANGED) {
+            lv_obj_remove_state(ui_ProcButton, LV_STATE_CHECKED);  // never latch in CW
+        }
+        return;
+    }
+
     if (event_code == LV_EVENT_VALUE_CHANGED) {
-        if (!lv_obj_is_valid(ui_ProcButton)) return;
-        
         bool is_checked = lv_obj_has_state(ui_ProcButton, LV_STATE_CHECKED);
         ESP_LOGI("UI_PROC", "PROC button state changed to: %s", is_checked ? "ON" : "OFF");
         
