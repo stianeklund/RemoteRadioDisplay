@@ -2286,7 +2286,9 @@ void parse_mr_command(const char *response) {
     }
 
     size_t len = strlen(response);
-    ESP_LOGD(TAG, "MR RESPONSE: '%s' (len: %zu)", response, len);
+    // Logged at INFO to capture the on-wire name bytes (P16) while investigating
+    // empty memory names. Revert to ESP_LOGD once the format is confirmed.
+    ESP_LOGI(TAG, "MR RESPONSE: '%s' (len: %zu)", response, len);
 
     // Validate prefix
     if (len < 2 || strncmp(response, "MR", 2) != 0) {

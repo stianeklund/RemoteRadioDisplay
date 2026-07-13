@@ -938,6 +938,11 @@ static void refresh_vfo_active_display() {
             }
             if (lv_obj_is_valid(ui_VfoBValue)) {
                 lv_obj_remove_flag(ui_VfoBValue, LV_OBJ_FLAG_HIDDEN);
+                // The frequency font (ui_freq_small_font) only has digit/'.'/'/'/':' glyphs.
+                // Memory names are alphanumeric, so switch to a text-capable font while in
+                // memory mode. Restored to the frequency font when exiting memory mode.
+                lv_obj_set_style_text_font(ui_VfoBValue, ui_btn_small_med_font(),
+                                           LV_PART_MAIN | LV_STATE_DEFAULT);
                 // Immediately show memory name (or placeholder) when entering memory mode
                 // This clears the old VFO B frequency text
                 memory_channel_data_t* mem_data = radio_get_memory_channel_buffer();
@@ -960,12 +965,15 @@ static void refresh_vfo_active_display() {
             if (lv_obj_is_valid(ui_VfoBButtonBackground)) {
                 lv_obj_add_flag(ui_VfoBButtonBackground, LV_OBJ_FLAG_HIDDEN);
             }
-            // Hide split button in memory mode
-            if (lv_obj_is_valid(ui_SplitButton)) {
-                lv_obj_add_flag(ui_SplitButton, LV_OBJ_FLAG_HIDDEN);
-            }
+            // Split indicator in memory mode is managed by the memory-mode split
+            // block below (driven by the IF-authoritative g_split_mode_active).
         } else {
             // Exiting memory mode - show VFO A/B labels, hide Memory labels
+            // Restore the frequency font for the inactive-VFO frequency text.
+            if (lv_obj_is_valid(ui_VfoBValue)) {
+                lv_obj_set_style_text_font(ui_VfoBValue, ui_freq_small_font(),
+                                           LV_PART_MAIN | LV_STATE_DEFAULT);
+            }
             if (lv_obj_is_valid(ui_VfoALabel)) {
                 lv_obj_remove_flag(ui_VfoALabel, LV_OBJ_FLAG_HIDDEN);
             }
@@ -1020,6 +1028,23 @@ static void refresh_vfo_active_display() {
             }
         }
         s_last_vfo_highlight = vfo_highlight;
+    }
+
+    // Handle split indicator while in memory mode.
+    // The VFO A/B backgrounds are hidden in memory mode, but a recalled split
+    // memory still operates split, which the radio reports via IF P12
+    // (g_split_mode_active). Surface it with the same SplitButton indicator.
+    if (is_memory_mode && (split_mode_changed || memory_mode_changed)) {
+        if (lv_obj_is_valid(ui_SplitButton)) {
+            if (g_split_mode_active) {
+                lv_obj_add_state(ui_SplitButton, LV_STATE_CHECKED);
+                lv_obj_remove_flag(ui_SplitButton, LV_OBJ_FLAG_HIDDEN);
+            } else {
+                lv_obj_remove_state(ui_SplitButton, LV_STATE_CHECKED);
+                lv_obj_add_flag(ui_SplitButton, LV_OBJ_FLAG_HIDDEN);
+            }
+        }
+        s_last_split_mode = g_split_mode_active;
     }
 }
 
@@ -1966,19 +1991,26 @@ static void update_memory_channel_display(const memory_channel_data_t *mem_data)
         return;
     }
 
+    // Ignore late/stale MR responses that arrive after leaving memory mode -
+    // otherwise the name would clobber the inactive-VFO frequency text.
+    if (g_current_vfo_function != 2) {
+        return;
+    }
+
     ESP_LOGI("UI", "update_memory_channel_display: ch=%u name='%s'",
              mem_data->channel, mem_data->name);
 
-    // Update Memory channel label (e.g., "M.CH 15", "M.CH P05", "M.CH E07")
-    if (lv_obj_is_valid(ui_MemoryChannelLabel)) {
-        char channel_text[16];
-        format_memory_channel_text(channel_text, sizeof(channel_text), mem_data->channel);
-        lv_label_set_text(ui_MemoryChannelLabel, channel_text);
-    }
+    // The M.CH label (ui_MemoryChannelLabel) is written exclusively from IF data
+    // (see update_if_data_display), which is the authoritative, low-latency source
+    // for the current channel. Writing it here too caused a race where a late MR
+    // response for a previous channel would overwrite the correct M.CH number.
 
     // Update VFO B value area with memory channel name
-    // Note: This function is only called when in memory mode, so we don't need to check g_current_vfo_function
     if (lv_obj_is_valid(ui_VfoBValue)) {
+        // Memory names are alphanumeric; ensure the text-capable font is active
+        // (the frequency font cannot render letters).
+        lv_obj_set_style_text_font(ui_VfoBValue, ui_btn_small_med_font(),
+                                   LV_PART_MAIN | LV_STATE_DEFAULT);
         // Display memory name if non-empty, otherwise show channel number with proper formatting
         if (mem_data->name[0] != '\0') {
             ESP_LOGI("UI", "Setting memory name: '%s'", mem_data->name);
