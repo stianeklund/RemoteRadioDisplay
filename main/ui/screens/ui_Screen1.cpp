@@ -780,6 +780,8 @@ static void update_if_data_display(const kenwood_if_data_t *if_data) {
                 char channel_text[16];
                 format_memory_channel_text(channel_text, sizeof(channel_text), (uint16_t)if_data->memory_channel);
                 lv_label_set_text(ui_MemoryChannelLabel, channel_text);
+                ESP_LOGI("UI", "IF M.CH update: %d -> %d ('%s')",
+                         s_last_displayed_channel, if_data->memory_channel, channel_text);
                 s_last_displayed_channel = if_data->memory_channel;
             }
         }
@@ -1991,42 +1993,55 @@ static void update_memory_channel_display(const memory_channel_data_t *mem_data)
         return;
     }
 
-    // Ignore late/stale MR responses that arrive after leaving memory mode -
-    // otherwise the name would clobber the inactive-VFO frequency text.
+    // Ignore updates once we've left memory mode (a late MR response would
+    // otherwise clobber the inactive-VFO frequency text).
     if (g_current_vfo_function != 2) {
+        return;
+    }
+
+    // Ignore stale MR responses for a channel we've already moved past. MR is
+    // requested per channel change and answers arrive asynchronously, so a late
+    // answer for the previous channel can carry the wrong channel/name. Only
+    // apply when the MR channel matches the radio's current memory channel (IF).
+    kenwood_if_data_t *ifd = radio_get_if_data_buffer();
+    if (ifd && ifd->function == 2 && ifd->memory_channel != mem_data->channel) {
+        ESP_LOGD("UI", "Ignoring stale MR ch=%u (current IF ch=%d)",
+                 mem_data->channel, ifd->memory_channel);
         return;
     }
 
     ESP_LOGI("UI", "update_memory_channel_display: ch=%u name='%s'",
              mem_data->channel, mem_data->name);
 
-    // The M.CH label (ui_MemoryChannelLabel) is written exclusively from IF data
-    // (see update_if_data_display), which is the authoritative, low-latency source
-    // for the current channel. Writing it here too caused a race where a late MR
-    // response for a previous channel would overwrite the correct M.CH number.
+    // Keep the M.CH label in sync from MR as well. The IF path is the fast,
+    // authoritative writer; this is a redundant confirm that is safe because the
+    // stale-response guard above ensures mem_data->channel is the current channel.
+    if (lv_obj_is_valid(ui_MemoryChannelLabel)) {
+        char channel_text[16];
+        format_memory_channel_text(channel_text, sizeof(channel_text), mem_data->channel);
+        lv_label_set_text(ui_MemoryChannelLabel, channel_text);
+    }
 
-    // Update VFO B value area with memory channel name
+    // Update VFO B value area with the memory name.
     if (lv_obj_is_valid(ui_VfoBValue)) {
         // Memory names are alphanumeric; ensure the text-capable font is active
         // (the frequency font cannot render letters).
         lv_obj_set_style_text_font(ui_VfoBValue, ui_btn_small_med_font(),
                                    LV_PART_MAIN | LV_STATE_DEFAULT);
-        // Display memory name if non-empty, otherwise show channel number with proper formatting
         if (mem_data->name[0] != '\0') {
             ESP_LOGI("UI", "Setting memory name: '%s'", mem_data->name);
             lv_label_set_text(ui_VfoBValue, mem_data->name);
         } else {
-            char name_text[16];
-            // Use same formatting convention as M.CH label (P00-P09, E00-E09)
-            if (mem_data->channel >= 100 && mem_data->channel <= 109) {
-                snprintf(name_text, sizeof(name_text), "P%02d", mem_data->channel - 100);
-            } else if (mem_data->channel >= 110 && mem_data->channel <= 119) {
-                snprintf(name_text, sizeof(name_text), "E%02d", mem_data->channel - 110);
-            } else {
-                snprintf(name_text, sizeof(name_text), "CH %03d", mem_data->channel);
-            }
-            ESP_LOGI("UI", "Setting fallback channel: '%s'", name_text);
-            lv_label_set_text(ui_VfoBValue, name_text);
+            // No stored name. Show the channel's frequency rather than repeating
+            // the M.CH number (which read as a confusing duplicate).
+            char freq_text[20];
+            uint32_t f = mem_data->frequency;
+            snprintf(freq_text, sizeof(freq_text), "%lu.%03lu.%03lu",
+                     (unsigned long)(f / 1000000u),
+                     (unsigned long)((f % 1000000u) / 1000u),
+                     (unsigned long)(f % 1000u));
+            ESP_LOGI("UI", "No name, showing frequency: '%s'", freq_text);
+            lv_label_set_text(ui_VfoBValue, freq_text);
         }
     }
 }
