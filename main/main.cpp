@@ -75,6 +75,25 @@ static void lvgl_subject_drain_cb(lv_timer_t *timer) {
     }
 }
 
+// Display render events feed the post-dequeue half of the pipeline metrics.
+// Without these, PIPELINE ages stop at the queue boundary and everything from
+// subject-apply to the panel is unmeasured.
+static void display_render_event_cb(lv_event_t *e) {
+    switch (lv_event_get_code(e)) {
+        case LV_EVENT_RENDER_START:
+            radio_subject_mark_render_start();
+            break;
+        case LV_EVENT_RENDER_READY:
+            radio_subject_mark_render_ready();
+            break;
+        case LV_EVENT_REFR_READY:
+            radio_subject_mark_refresh_ready();
+            break;
+        default:
+            break;
+    }
+}
+
 static void pipeline_diagnostics_cb(lv_timer_t *timer) {
     (void) timer;
     const uart_pipeline_queue_stats_t tx = uart_reset_tx_queue_stats();
@@ -90,11 +109,27 @@ static void pipeline_diagnostics_cb(lv_timer_t *timer) {
              (unsigned long)parser.current_depth, (unsigned long)parser.high_watermark,
              (unsigned long)parser.dequeued, (unsigned long long)parser.avg_age_us,
              (unsigned long long)parser.max_age_us, (unsigned long)parser.dropped);
+    uint32_t rx_ring_cur = 0;
+    uint32_t rx_ring_hw = 0;
+    uart_get_rx_ring_stats(&rx_ring_cur, &rx_ring_hw);
+    ESP_LOGI("PIPELINE",
+             "RxRing cur=%luB hw=%luB (UART driver RX ring; drained by read_uart, "
+             "NOT counted in ParserQ/SubjectQ age)",
+             (unsigned long)rx_ring_cur, (unsigned long)rx_ring_hw);
     ESP_LOGI("PIPELINE",
              "SubjectQ depth=%lu hw=%lu processed=%lu age(avg=%lluus max=%lluus) drop=%lu",
              (unsigned long)subjects.current_depth, (unsigned long)subjects.high_watermark,
              (unsigned long)subjects.processed, (unsigned long long)subjects.avg_age_us,
              (unsigned long long)subjects.max_age_us, (unsigned long)subjects.dropped);
+    ESP_LOGI("PIPELINE",
+             "Display apply(avg=%lluus max=%lluus n=%lu) render(avg=%lluus max=%lluus n=%lu) "
+             "enqueue2refresh(avg=%lluus max=%lluus n=%lu)",
+             (unsigned long long)subjects.apply_avg_us, (unsigned long long)subjects.apply_max_us,
+             (unsigned long)subjects.apply_samples,
+             (unsigned long long)subjects.render_avg_us, (unsigned long long)subjects.render_max_us,
+             (unsigned long)subjects.render_samples,
+             (unsigned long long)subjects.e2e_avg_us, (unsigned long long)subjects.e2e_max_us,
+             (unsigned long)subjects.e2e_samples);
 }
 
 void monitoring_task(void *pvParameters);
@@ -245,6 +280,18 @@ extern "C" void app_main(void) {
     lv_timer_create(pipeline_diagnostics_cb, 10000, NULL);
     ESP_LOGI(TAG, "Pipeline diagnostics timer created (10s)");
 
+    // Meter the stages after the subject queue: apply, render, and refresh-complete.
+    lv_display_t *diag_disp = lvgl_get_display();
+    if (diag_disp != NULL && lvgl_port_lock(1000)) {
+        lv_display_add_event_cb(diag_disp, display_render_event_cb, LV_EVENT_RENDER_START, NULL);
+        lv_display_add_event_cb(diag_disp, display_render_event_cb, LV_EVENT_RENDER_READY, NULL);
+        lv_display_add_event_cb(diag_disp, display_render_event_cb, LV_EVENT_REFR_READY, NULL);
+        lvgl_port_unlock();
+        ESP_LOGI(TAG, "Display render instrumentation attached");
+    } else {
+        ESP_LOGW(TAG, "Render instrumentation skipped (no display or LVGL lock timeout)");
+    }
+
     // Time client (NTP/GPS) initialization will now be handled by time_sync_task
     // to allow concurrent startup with UART.
 
@@ -313,10 +360,13 @@ extern "C" void app_main(void) {
             "uart_read_task",
             READ_UART_TASK_STACK_SIZE,
             NULL,
-            5,  // Reduced from 10 to 5 to prevent priority inversions with LVGL task
+            8,  // Above LVGL (6): pinned to core 1 so WiFi/lwIP on core 0 cannot
+                // starve CAT ingest for seconds. Drain is brief, so preempting
+                // LVGL here is cheap; the prior core-0/prio-5 placement let the
+                // 8KB RX ring back up (seconds of hidden latency) under network load.
             read_uart_stack,
             &read_uart_task_buffer,
-            0  // Pin to core 0
+            1  // Pin to core 1 (away from WiFi/lwIP)
         );
         if (read_uart_handle == NULL) {
             ESP_LOGE(TAG, "Failed to create read_uart task");

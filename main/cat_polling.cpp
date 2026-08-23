@@ -411,8 +411,8 @@ bool cat_polling_is_cat_active(void) {
     return g_polling_state.cat_connection_active;
 }
 
-uint32_t cat_polling_get_last_activity_time(void) {
-    return (uint32_t)g_polling_state.last_cat_activity;
+uint64_t cat_polling_get_last_activity_time(void) {
+    return g_polling_state.last_cat_activity;
 }
 
 const cat_polling_state_t* cat_polling_get_state(void) {

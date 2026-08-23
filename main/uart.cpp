@@ -75,6 +75,15 @@ struct queue_metrics_t {
 static queue_metrics_t s_tx_metrics;
 static queue_metrics_t s_parser_metrics;
 
+// RX driver ring-buffer occupancy (bytes waiting in the ESP-IDF UART RX ring
+// before read_uart drains them). This backlog is INVISIBLE to the ParserQ/
+// SubjectQ age stats: those timestamps are stamped only AFTER bytes are read
+// out of this ring, so a full ring shows up as seconds of real latency while
+// every queue age still reads microseconds. High-watermark is sampled by
+// read_uart at the top of its loop (its first act after any starvation), so
+// it captures the peak backlog accumulated while the task was descheduled.
+static std::atomic<uint64_t> s_rx_ring_hwm{0};
+
 static void update_max(std::atomic<uint64_t>& target, uint64_t value) {
     uint64_t previous = target.load(std::memory_order_relaxed);
     while (value > previous &&
@@ -374,13 +383,15 @@ void read_uart(void *pvParameters) {
         static StaticTask_t cat_parser_task_buffer;  // Keep CAT parser TCB in INTERNAL RAM
         cat_parser_task_handle = xTaskCreateStaticPinnedToCore(
             cat_parser_task,
-            "cat_parser", 
+            "cat_parser",
             CAT_PARSER_STACK_SIZE,
             NULL,
-            4,
+            7,  // Above LVGL (6), just below read_uart (8): must also live on
+                // core 1, else it becomes the next task starved by core-0
+                // WiFi/lwIP once read_uart is moved, backing up ParserQ instead.
             cat_parser_stack,
             &cat_parser_task_buffer,
-            0  // Pin to core 0
+            1  // Pin to core 1 (with read_uart, away from WiFi/lwIP)
         );
         
         if (cat_parser_task_handle == NULL) {
@@ -477,6 +488,9 @@ void read_uart(void *pvParameters) {
             }
         }
         
+        // Sample RX ring occupancy for backlog diagnostics (see s_rx_ring_hwm).
+        update_max(s_rx_ring_hwm, static_cast<uint64_t>(uart_buffered_len));
+
         if (uart_buffered_len == 0) {
             // No data available, add small delay to prevent tight loop and excessive watchdog feeds
             vTaskDelay(pdMS_TO_TICKS(1));
@@ -672,6 +686,19 @@ uart_pipeline_queue_stats_t uart_reset_tx_queue_stats(void) {
 
 uart_pipeline_queue_stats_t uart_reset_parser_queue_stats(void) {
     return reset_metrics(s_parser_metrics, cat_cmd_queue);
+}
+
+void uart_get_rx_ring_stats(uint32_t *current_bytes, uint32_t *high_watermark_bytes) {
+    if (current_bytes) {
+        size_t cur = 0;
+        if (uart_get_buffered_data_len(s_uart_port, &cur) != ESP_OK) {
+            cur = 0;
+        }
+        *current_bytes = static_cast<uint32_t>(cur);
+    }
+    if (high_watermark_bytes) {
+        *high_watermark_bytes = static_cast<uint32_t>(s_rx_ring_hwm.exchange(0, std::memory_order_relaxed));
+    }
 }
 
 bool uart_is_ready(void) {

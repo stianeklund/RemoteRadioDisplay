@@ -31,4 +31,9 @@ int uart_get_port(void);
 bool uart_is_ready(void);
 uart_pipeline_queue_stats_t uart_reset_tx_queue_stats(void);
 uart_pipeline_queue_stats_t uart_reset_parser_queue_stats(void);
+
+// RX driver ring-buffer occupancy diagnostics. current_bytes is an instantaneous
+// read of bytes waiting in the UART RX ring; high_watermark_bytes is the peak
+// observed since the last call (reset-on-read). Either pointer may be NULL.
+void uart_get_rx_ring_stats(uint32_t *current_bytes, uint32_t *high_watermark_bytes);
 #endif // UART_H

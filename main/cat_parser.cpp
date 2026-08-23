@@ -849,17 +849,24 @@ static void update_frequency_displays(int rx_vfo_function, int tx_vfo_function, 
         return; // No change, skip message send
     }
 
-    // Update deduplication state
-    s_last_active_freq = active_freq;
-    s_last_inactive_freq = inactive_freq;
-    s_last_active_vfo = (int8_t)active_vfo;
-
     // Send consolidated VFO update - single message instead of 5
     static vfo_update_t vfo_update;
     vfo_update.active_freq = active_freq;
     vfo_update.inactive_freq = inactive_freq;
     vfo_update.active_vfo = (int8_t)active_vfo;
-    radio_subject_set_pointer_async(&radio_vfo_consolidated_subject, &vfo_update, sizeof(vfo_update));
+    if (!radio_subject_set_pointer_async(&radio_vfo_consolidated_subject, &vfo_update,
+                                         sizeof(vfo_update))) {
+        // Queue was full. Leave the dedup state untouched so the next IF/FA/FB frame
+        // resends this value; latching it here would freeze the displayed frequency
+        // until the radio happened to tune somewhere else.
+        ESP_LOGW(TAG, "VFO update dropped (subject queue full), retrying on next frame");
+        return;
+    }
+
+    // Update deduplication state only after the update is safely queued
+    s_last_active_freq = active_freq;
+    s_last_inactive_freq = inactive_freq;
+    s_last_active_vfo = (int8_t)active_vfo;
 
 #if FREQ_UPDATE_STATS_ENABLED
     g_freq_stats.ui_queue_count++;

@@ -30,7 +30,7 @@ typedef struct {
     cat_vfo_t rx_vfo;              // Current RX VFO (from FR command)
     cat_vfo_t tx_vfo;              // Current TX VFO (from FT command)
     bool cat_connection_active;    // CAT connection is active
-    uint32_t last_cat_activity;   // Timestamp of last CAT activity
+    uint64_t last_cat_activity;   // Timestamp of last CAT activity (ms since boot)
 } cat_polling_state_t;
 
 // Function declarations
@@ -133,9 +133,9 @@ bool cat_polling_is_cat_active(void);
 
 /**
  * Get timestamp of last CAT activity (for screensaver/inactivity detection)
- * @return Timestamp in milliseconds (lv_tick_get() format)
+ * @return Milliseconds since boot, from esp_timer_get_time()
  */
-uint32_t cat_polling_get_last_activity_time(void);
+uint64_t cat_polling_get_last_activity_time(void);
 
 /**
  * Get polling state for debugging

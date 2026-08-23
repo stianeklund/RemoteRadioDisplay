@@ -44,8 +44,20 @@ typedef struct {
     uint32_t dropped;
     uint32_t processed;
     uint32_t current_depth;
-    uint64_t max_age_us;
-    uint64_t avg_age_us;
+    uint64_t max_age_us;   /**< enqueue -> dequeue */
+    uint64_t avg_age_us;   /**< enqueue -> dequeue */
+
+    /* Post-dequeue stages. Without these the pipeline log stops at the queue
+       boundary and everything from subject-apply to the panel is invisible. */
+    uint64_t apply_avg_us;    /**< time inside radio_subject_drain_updates() */
+    uint64_t apply_max_us;
+    uint32_t apply_samples;   /**< drain calls that processed at least one item */
+    uint64_t render_avg_us;   /**< LV_EVENT_RENDER_START -> LV_EVENT_RENDER_READY */
+    uint64_t render_max_us;
+    uint32_t render_samples;
+    uint64_t e2e_avg_us;      /**< enqueue -> LV_EVENT_REFR_READY (flush dispatched) */
+    uint64_t e2e_max_us;
+    uint32_t e2e_samples;
 } radio_subject_queue_stats_t;
 
 // ============================================================================
@@ -150,6 +162,32 @@ int radio_subject_drain_updates(void);
  */
 int radio_subject_pending_count(void);
 radio_subject_queue_stats_t radio_subject_reset_queue_stats(void);
+
+// ============================================================================
+// Render-Stage Instrumentation (LVGL task only)
+// ============================================================================
+
+/**
+ * @brief Hook for LV_EVENT_RENDER_START on the display
+ */
+void radio_subject_mark_render_start(void);
+
+/**
+ * @brief Hook for LV_EVENT_RENDER_READY on the display
+ *
+ * Closes the render-duration sample opened by radio_subject_mark_render_start().
+ */
+void radio_subject_mark_render_ready(void);
+
+/**
+ * @brief Hook for LV_EVENT_REFR_READY on the display
+ *
+ * Closes the end-to-end sample: oldest still-unrendered enqueue timestamp to the
+ * point LVGL finished the refresh and dispatched the flush. On RGB panels the
+ * framebuffer write is the glass; on DSI the DMA transfer may still be in flight,
+ * so treat this as a lower bound for panel-visible latency.
+ */
+void radio_subject_mark_refresh_ready(void);
 
 #ifdef __cplusplus
 }
