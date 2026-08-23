@@ -76,6 +76,20 @@ void screensaver_trigger_activity(void);
  */
 void screensaver_update_backlight(uint8_t new_level);
 
+/**
+ * @brief Enable/disable waking the display on RX->TX transitions
+ *
+ * @param enabled true to wake display when radio starts transmitting
+ */
+void screensaver_set_wake_on_tx(bool enabled);
+
+/**
+ * @brief Get current wake-on-TX setting
+ *
+ * @return true if wake-on-TX is enabled
+ */
+bool screensaver_get_wake_on_tx(void);
+
 #ifdef __cplusplus
 }
 #endif

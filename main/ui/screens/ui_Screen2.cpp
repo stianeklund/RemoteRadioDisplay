@@ -74,6 +74,7 @@ lv_obj_t * ui_SMeterAveragingSwitch;
 lv_obj_t * ui_RebootButton;
 lv_obj_t * ui_ScreensaverButton;
 lv_obj_t * ui_ScreensaverLabel;
+lv_obj_t * ui_WakeOnTxSwitch;
 
 // Internal menu root for the Settings screen
 static lv_obj_t * ui_Menu;
@@ -147,6 +148,7 @@ typedef struct {
     bool pep_enabled;
     bool smeter_averaging_enabled;
     bool antenna_switch_enabled;
+    bool wake_on_tx_enabled;
     bool settings_changed;
 } ui_settings_state_t;
 
@@ -199,6 +201,7 @@ static void ui_event_TransverterButton_clicked(lv_event_t * e);
 static void ui_event_PollingButton_clicked(lv_event_t * e);
 static void ui_event_AIModeButton_clicked(lv_event_t * e);
 static void ui_event_ScreensaverButton_clicked(lv_event_t * e);
+static void ui_event_WakeOnTxSwitch(lv_event_t * e);
 static void ui_event_CwSidetoneSlider(lv_event_t * e);
 static void ui_event_CwPitchSlider(lv_event_t * e);
 static void ui_event_RadioMenuSlider(lv_event_t * e);
@@ -1346,7 +1349,18 @@ static void ui_load_saved_settings(void) {
     current_settings.pep_enabled = settings.pep_enabled;
     current_settings.smeter_averaging_enabled = settings.smeter_averaging_enabled;
     current_settings.antenna_switch_enabled = settings.antenna_switch_enabled;
+    current_settings.wake_on_tx_enabled = settings.wake_on_tx_enabled;
     current_settings.settings_changed = false;
+
+    // Apply wake-on-TX setting to the screensaver module
+    screensaver_set_wake_on_tx(settings.wake_on_tx_enabled);
+    if (lv_obj_is_valid(ui_WakeOnTxSwitch)) {
+        if (settings.wake_on_tx_enabled) {
+            lv_obj_add_state(ui_WakeOnTxSwitch, LV_STATE_CHECKED);
+        } else {
+            lv_obj_remove_state(ui_WakeOnTxSwitch, LV_STATE_CHECKED);
+        }
+    }
     
     // Apply XVTR offset mix setting
     xvtr_offset_mix_enabled = settings.xvtr_offset_mix_enabled;
@@ -1615,6 +1629,11 @@ void ui_Screen2_screen_init(void) {
     lv_obj_add_event_cb(ui_ScreensaverButton, ui_event_ScreensaverButton_clicked, LV_EVENT_CLICKED, NULL);
     // Set initial button text and color based on current screensaver setting
     ui_update_screensaver_button_style(screensaver_get_timeout());
+
+    // Wake display on RX->TX (as if touched), next to the screensaver setting
+    lv_obj_t *row_wake_on_tx = create_switch(sec_disp, NULL, "Wake on TX", screensaver_get_wake_on_tx());
+    ui_WakeOnTxSwitch = lv_obj_get_child(row_wake_on_tx, -1);
+    lv_obj_add_event_cb(ui_WakeOnTxSwitch, ui_event_WakeOnTxSwitch, LV_EVENT_VALUE_CHANGED, NULL);
 
     // Radio Menu page (two-column layout)
     lv_obj_t *sec_radio = lv_menu_section_create(ui_MenuPageRadioMenu);
@@ -2156,6 +2175,7 @@ void ui_Screen2_screen_destroy(void) {
     ui_PepToggleLabel = NULL;
     ui_PepToggleSwitch = NULL;
     ui_SMeterAveragingSwitch = NULL;
+    ui_WakeOnTxSwitch = NULL;
     ui_RebootButton = NULL;
 }
 
@@ -2176,6 +2196,26 @@ void ui_event_SMeterAveragingSwitch(lv_event_t * e)
         lv_subject_set_int(&radio_smeter_averaging_subject, is_checked ? 1 : 0);
 
         ESP_LOGI("UI_Screen2", "S-Meter Averaging toggled: %s", is_checked ? "ON" : "OFF");
+    }
+}
+
+void ui_event_WakeOnTxSwitch(lv_event_t * e)
+{
+    lv_event_code_t event_code = lv_event_get_code(e);
+    lv_obj_t * target = (lv_obj_t*)lv_event_get_target(e);
+
+    if(event_code == LV_EVENT_VALUE_CHANGED) {
+        bool is_checked = lv_obj_has_state(target, LV_STATE_CHECKED);
+
+        current_settings.wake_on_tx_enabled = is_checked;
+        screensaver_set_wake_on_tx(is_checked);
+
+        esp_err_t ret = settings_save_wake_on_tx(is_checked);
+        if (ret != ESP_OK) {
+            ESP_LOGW("UI_Screen2", "Failed to save wake on TX setting: %s", esp_err_to_name(ret));
+        }
+
+        ESP_LOGI("UI_Screen2", "Wake on TX toggled: %s", is_checked ? "ON" : "OFF");
     }
 }
 

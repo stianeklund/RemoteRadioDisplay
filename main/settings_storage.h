@@ -17,6 +17,7 @@ extern "C" {
 #define KEY_PEP_ENABLED "pep_enabled"
 #define KEY_SMETER_AVERAGING "smeter_avg"
 #define KEY_ANTENNA_SWITCH "ant_switch"
+#define KEY_WAKE_ON_TX "wake_on_tx"
 
 // Settings structure for easy access
 typedef struct {
@@ -28,6 +29,7 @@ typedef struct {
     bool pep_enabled;
     bool smeter_averaging_enabled;
     bool antenna_switch_enabled;
+    bool wake_on_tx_enabled;
 } user_settings_t;
 
 // Default settings values
@@ -39,6 +41,7 @@ typedef struct {
 #define DEFAULT_PEP_ENABLED true
 #define DEFAULT_SMETER_AVERAGING true
 #define DEFAULT_ANTENNA_SWITCH false
+#define DEFAULT_WAKE_ON_TX true
 
 /**
  * Initialize settings storage
@@ -72,6 +75,7 @@ esp_err_t settings_save_peak_hold_duration(uint32_t duration_ms);
 esp_err_t settings_save_pep_enabled(bool enabled);
 esp_err_t settings_save_smeter_averaging(bool enabled);
 esp_err_t settings_save_antenna_switch(bool enabled);
+esp_err_t settings_save_wake_on_tx(bool enabled);
 
 /**
  * Get current settings snapshot (combines stored + runtime values)

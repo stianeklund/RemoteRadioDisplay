@@ -121,7 +121,18 @@ esp_err_t settings_load(user_settings_t *settings) {
         ESP_LOGD(TAG, "Antenna switch not found, using default: %s", settings->antenna_switch_enabled ? "ON" : "OFF");
     }
 
-    ESP_LOGI(TAG, "Settings loaded: XVTR=%s, CAT=%s, AI=%d, Peak=%s, Duration=%lums, PEP=%s, SMeter_Avg=%s, AntSwitch=%s",
+    // Load wake-on-TX setting
+    required_size = sizeof(value_u8);
+    err = nvs_get_blob(settings_nvs_handle, KEY_WAKE_ON_TX, &value_u8, &required_size);
+    if (err == ESP_OK) {
+        settings->wake_on_tx_enabled = (bool)value_u8;
+        ESP_LOGD(TAG, "Loaded wake on TX: %s", settings->wake_on_tx_enabled ? "ON" : "OFF");
+    } else {
+        settings->wake_on_tx_enabled = DEFAULT_WAKE_ON_TX;
+        ESP_LOGD(TAG, "Wake on TX not found, using default: %s", settings->wake_on_tx_enabled ? "ON" : "OFF");
+    }
+
+    ESP_LOGI(TAG, "Settings loaded: XVTR=%s, CAT=%s, AI=%d, Peak=%s, Duration=%lums, PEP=%s, SMeter_Avg=%s, AntSwitch=%s, WakeOnTx=%s",
              settings->xvtr_offset_mix_enabled ? "ON" : "OFF",
              settings->cat_polling_enabled ? "ON" : "OFF",
              settings->ai_mode,
@@ -129,8 +140,9 @@ esp_err_t settings_load(user_settings_t *settings) {
              settings->peak_hold_duration_ms,
              settings->pep_enabled ? "ON" : "OFF",
              settings->smeter_averaging_enabled ? "ON" : "OFF",
-             settings->antenna_switch_enabled ? "ON" : "OFF");
-    
+             settings->antenna_switch_enabled ? "ON" : "OFF",
+             settings->wake_on_tx_enabled ? "ON" : "OFF");
+
     return ESP_OK;
 }
 
@@ -212,6 +224,14 @@ esp_err_t settings_save(const user_settings_t *settings) {
         return err;
     }
 
+    // Save wake on TX
+    value_u8 = (uint8_t)settings->wake_on_tx_enabled;
+    err = nvs_set_blob(settings_nvs_handle, KEY_WAKE_ON_TX, &value_u8, sizeof(value_u8));
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to save wake on TX: %s", esp_err_to_name(err));
+        return err;
+    }
+
     // Commit changes to flash
     err = nvs_commit(settings_nvs_handle);
     if (err != ESP_OK) {
@@ -219,7 +239,7 @@ esp_err_t settings_save(const user_settings_t *settings) {
         return err;
     }
 
-    ESP_LOGI(TAG, "Settings saved: XVTR=%s, CAT=%s, AI=%d, Peak=%s, Duration=%lums, PEP=%s, SMeter_Avg=%s, AntSwitch=%s",
+    ESP_LOGI(TAG, "Settings saved: XVTR=%s, CAT=%s, AI=%d, Peak=%s, Duration=%lums, PEP=%s, SMeter_Avg=%s, AntSwitch=%s, WakeOnTx=%s",
              settings->xvtr_offset_mix_enabled ? "ON" : "OFF",
              settings->cat_polling_enabled ? "ON" : "OFF",
              settings->ai_mode,
@@ -227,8 +247,9 @@ esp_err_t settings_save(const user_settings_t *settings) {
              settings->peak_hold_duration_ms,
              settings->pep_enabled ? "ON" : "OFF",
              settings->smeter_averaging_enabled ? "ON" : "OFF",
-             settings->antenna_switch_enabled ? "ON" : "OFF");
-    
+             settings->antenna_switch_enabled ? "ON" : "OFF",
+             settings->wake_on_tx_enabled ? "ON" : "OFF");
+
     return ESP_OK;
 }
 
@@ -329,6 +350,18 @@ esp_err_t settings_save_antenna_switch(bool enabled) {
     if (err == ESP_OK) {
         err = nvs_commit(settings_nvs_handle);
         ESP_LOGD(TAG, "Antenna switch saved: %s", enabled ? "ON" : "OFF");
+    }
+    return err;
+}
+
+esp_err_t settings_save_wake_on_tx(bool enabled) {
+    if (settings_nvs_handle == 0) return ESP_ERR_INVALID_STATE;
+
+    uint8_t value_u8 = (uint8_t)enabled;
+    esp_err_t err = nvs_set_blob(settings_nvs_handle, KEY_WAKE_ON_TX, &value_u8, sizeof(value_u8));
+    if (err == ESP_OK) {
+        err = nvs_commit(settings_nvs_handle);
+        ESP_LOGD(TAG, "Wake on TX saved: %s", enabled ? "ON" : "OFF");
     }
     return err;
 }

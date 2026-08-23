@@ -11,6 +11,7 @@
 #include "esp_lvgl_port.h"
 #include "lvgl.h"
 #include "uart.h"  // For uart_write_raw to notify panel of state changes
+#include "radio/radio_subjects.h"  // For radio_tx_status_subject (RX->TX wake)
 
 static const char *TAG = "SCREENSAVER";
 
@@ -23,18 +24,21 @@ static struct {
     uint8_t saved_backlight;
     lv_obj_t *overlay_screen;
     lv_timer_t *check_timer;
+    bool wake_on_tx_enabled;
 } g_screensaver = {
     .timeout = SCREENSAVER_15_MIN,  // Default enabled - UI reads this before screensaver_init()
     .active = false,
     .saved_backlight = 255,
     .overlay_screen = NULL,
-    .check_timer = NULL
+    .check_timer = NULL,
+    .wake_on_tx_enabled = true  // Default enabled - UI reads this before settings are loaded
 };
 
 // Forward declarations
 static void screensaver_check_cb(lv_timer_t *timer);
 static void screensaver_activate(void);
 static void screensaver_deactivate(void);
+static void screensaver_tx_status_observer_cb(lv_observer_t *observer, lv_subject_t *subject);
 
 /**
  * @brief Activate screensaver (blank screen + backlight off)
@@ -151,6 +155,22 @@ static void screensaver_check_cb(lv_timer_t *timer) {
     }
 }
 
+/**
+ * @brief Observer callback: wake display when radio transitions RX->TX
+ */
+static void screensaver_tx_status_observer_cb(lv_observer_t *observer, lv_subject_t *subject) {
+    LV_UNUSED(observer);
+
+    if (!g_screensaver.wake_on_tx_enabled) {
+        return;
+    }
+
+    if (lv_subject_get_int(subject) != 0) {
+        ESP_LOGD(TAG, "RX->TX transition - waking display");
+        screensaver_trigger_activity();
+    }
+}
+
 // ============================================================================
 // Public API
 // ============================================================================
@@ -176,6 +196,9 @@ esp_err_t screensaver_init(void) {
         ESP_LOGE(TAG, "Failed to create screensaver check timer");
         return ESP_FAIL;
     }
+
+    // Wake display on RX->TX transitions, same as a touch
+    lv_subject_add_observer(&radio_tx_status_subject, screensaver_tx_status_observer_cb, NULL);
 
     lvgl_port_unlock();
 
@@ -249,4 +272,13 @@ void screensaver_update_backlight(uint8_t new_level) {
 
     // Trigger LVGL activity to reset inactivity timer
     lv_display_trigger_activity(NULL);
+}
+
+void screensaver_set_wake_on_tx(bool enabled) {
+    ESP_LOGI(TAG, "Wake on TX %s", enabled ? "enabled" : "disabled");
+    g_screensaver.wake_on_tx_enabled = enabled;
+}
+
+bool screensaver_get_wake_on_tx(void) {
+    return g_screensaver.wake_on_tx_enabled;
 }
