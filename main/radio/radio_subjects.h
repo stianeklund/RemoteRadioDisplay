@@ -236,6 +236,9 @@ extern lv_subject_t radio_xvtr_offset_mix_subject;
 /** Transverter enabled (UIXD) toggle (0=OFF, 1=ON) */
 extern lv_subject_t radio_transverter_enabled_subject;
 
+/** Auto IF filter B on split+CW (UIAF) toggle (0=OFF, 1=ON) */
+extern lv_subject_t radio_auto_filter_b_split_cw_subject;
+
 // ============================================================================
 // Notification Subjects (increment counter to notify)
 // ============================================================================

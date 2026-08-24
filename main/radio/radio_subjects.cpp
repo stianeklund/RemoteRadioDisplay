@@ -135,6 +135,7 @@ lv_subject_t radio_smeter_averaging_subject;
 lv_subject_t radio_backlight_subject;
 lv_subject_t radio_xvtr_offset_mix_subject;
 lv_subject_t radio_transverter_enabled_subject;
+lv_subject_t radio_auto_filter_b_split_cw_subject;
 
 // ============================================================================
 // Subject Definitions - Notifications
@@ -255,6 +256,7 @@ esp_err_t radio_subjects_init(void)
     lv_subject_init_int(&radio_backlight_subject, 255);  // Full brightness
     lv_subject_init_int(&radio_xvtr_offset_mix_subject, 0);  // OFF by default
     lv_subject_init_int(&radio_transverter_enabled_subject, 0);  // OFF by default
+    lv_subject_init_int(&radio_auto_filter_b_split_cw_subject, 0);  // OFF by default
 
     // Notification subjects (counter-based)
     lv_subject_init_int(&radio_force_refresh_subject, 0);

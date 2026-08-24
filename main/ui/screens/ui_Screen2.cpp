@@ -75,6 +75,7 @@ lv_obj_t * ui_RebootButton;
 lv_obj_t * ui_ScreensaverButton;
 lv_obj_t * ui_ScreensaverLabel;
 lv_obj_t * ui_WakeOnTxSwitch;
+lv_obj_t * ui_AutoFilterBSplitCwSwitch;
 
 // Internal menu root for the Settings screen
 static lv_obj_t * ui_Menu;
@@ -149,6 +150,7 @@ typedef struct {
     bool smeter_averaging_enabled;
     bool antenna_switch_enabled;
     bool wake_on_tx_enabled;
+    bool auto_filter_b_split_cw_enabled;
     bool settings_changed;
 } ui_settings_state_t;
 
@@ -162,6 +164,9 @@ static bool xvtr_offset_mix_enabled = false;
 
 // Static variable to track Transverter (UIXD) enabled state
 static bool transverter_enabled = false;
+
+// Static variable to track Auto IF Filter B on Split+CW (UIAF) enabled state
+static bool auto_filter_b_split_cw_enabled = false;
 
 // Static variable to track Panel Data (UIDE) enabled state (default: enabled)
 static bool panel_data_enabled = true;
@@ -198,6 +203,7 @@ static void ui_load_saved_settings(void);
 // static void post_screen2_init_cb(lv_timer_t *t);  // Commented out - not used
 static void ui_event_PlaceholderButton1_clicked(lv_event_t * e);
 static void ui_event_TransverterButton_clicked(lv_event_t * e);
+static void ui_event_AutoFilterBSplitCwSwitch(lv_event_t * e);
 static void ui_event_PollingButton_clicked(lv_event_t * e);
 static void ui_event_AIModeButton_clicked(lv_event_t * e);
 static void ui_event_ScreensaverButton_clicked(lv_event_t * e);
@@ -636,6 +642,33 @@ void ui_set_transverter_enabled(bool enabled) {
     ESP_LOGD("UI_Screen2", "Transverter state updated from CAT: %s", enabled ? "ON" : "OFF");
 }
 
+// Event handler for Auto IF Filter B on Split+CW toggle (sends UIAF to ARCI)
+// The filter switching itself is performed by ARCI; this only carries the preference.
+static void ui_event_AutoFilterBSplitCwSwitch(lv_event_t * e)
+{
+    lv_event_code_t event_code = lv_event_get_code(e);
+
+    if (event_code == LV_EVENT_VALUE_CHANGED) {
+        lv_obj_t *switch_obj = (lv_obj_t*)lv_event_get_target(e);
+        bool is_checked = lv_obj_has_state(switch_obj, LV_STATE_CHECKED);
+
+        auto_filter_b_split_cw_enabled = is_checked;
+        current_settings.auto_filter_b_split_cw_enabled = is_checked;
+
+        esp_err_t ret = settings_save_auto_filter_b_split_cw(is_checked);
+        if (ret != ESP_OK) {
+            ESP_LOGW("UI_Screen2", "Failed to save auto filter B on split+CW setting: %s", esp_err_to_name(ret));
+        }
+
+        // Send UIAF command to ARCI firmware (ARCI does not persist this itself)
+        const char *cmd = is_checked ? "UIAF1;" : "UIAF0;";
+        uart_write_message(cmd);
+
+        ESP_LOGI("UI_Screen2", "Auto IF Filter B on Split+CW toggled: %s (sent %s to ARCI)",
+                 is_checked ? "ON" : "OFF", cmd);
+    }
+}
+
 // Event handler for Panel Data toggle button (sends UIDE to panel)
 static void ui_event_PanelDataButton_clicked(lv_event_t * e)
 {
@@ -944,6 +977,24 @@ static void ui_transverter_enabled_observer_cb(lv_observer_t *observer, lv_subje
     LV_UNUSED(observer);
     int32_t enabled = lv_subject_get_int(subject);
     ui_set_transverter_enabled(enabled != 0);
+}
+
+// LVGL 9 observer callback for Auto IF Filter B on Split+CW toggle updates (UIAF confirmation)
+static void ui_auto_filter_b_split_cw_observer_cb(lv_observer_t *observer, lv_subject_t *subject) {
+    LV_UNUSED(observer);
+    bool enabled = lv_subject_get_int(subject) != 0;
+
+    auto_filter_b_split_cw_enabled = enabled;
+
+    if (lv_obj_is_valid(ui_AutoFilterBSplitCwSwitch)) {
+        if (enabled) {
+            lv_obj_add_state(ui_AutoFilterBSplitCwSwitch, LV_STATE_CHECKED);
+        } else {
+            lv_obj_remove_state(ui_AutoFilterBSplitCwSwitch, LV_STATE_CHECKED);
+        }
+    }
+
+    ESP_LOGD("UI_Screen2", "Auto IF Filter B on Split+CW state updated from CAT: %s", enabled ? "ON" : "OFF");
 }
 
 // Core transverter state display update logic
@@ -1312,6 +1363,22 @@ void ui_event_PepToggleSwitch(lv_event_t * e)
     }
 }
 
+// Timer callback to push the saved auto filter B preference to ARCI after screen
+// initialization, so ARCI's non-persisted state matches ours every session
+static void auto_filter_b_restore_timer_cb(lv_timer_t* timer) {
+    const bool *enabled = (const bool*)lv_timer_get_user_data(timer);
+
+    const char *cmd = *enabled ? "UIAF1;" : "UIAF0;";
+    esp_err_t ret = uart_write_message(cmd);
+    if (ret != ESP_OK) {
+        ESP_LOGW("UI_Settings", "Failed to restore auto filter B on split+CW: %s", esp_err_to_name(ret));
+    } else {
+        ESP_LOGI("UI_Settings", "Auto IF Filter B on Split+CW restored: %s (sent %s to ARCI)",
+                 *enabled ? "ON" : "OFF", cmd);
+    }
+    lv_timer_del(timer);  // Delete one-shot timer
+}
+
 // Timer callback to restore AI mode after screen initialization
 static void ai_mode_restore_timer_cb(lv_timer_t* timer) {
     cat_ai_mode_t* mode = (cat_ai_mode_t*)lv_timer_get_user_data(timer);
@@ -1350,6 +1417,7 @@ static void ui_load_saved_settings(void) {
     current_settings.smeter_averaging_enabled = settings.smeter_averaging_enabled;
     current_settings.antenna_switch_enabled = settings.antenna_switch_enabled;
     current_settings.wake_on_tx_enabled = settings.wake_on_tx_enabled;
+    current_settings.auto_filter_b_split_cw_enabled = settings.auto_filter_b_split_cw_enabled;
     current_settings.settings_changed = false;
 
     // Apply wake-on-TX setting to the screensaver module
@@ -1435,6 +1503,26 @@ static void ui_load_saved_settings(void) {
     }
     // Update Screen1 averaging behavior via observer
     lv_subject_set_int(&radio_smeter_averaging_subject, settings.smeter_averaging_enabled ? 1 : 0);
+
+    // Apply auto IF filter B on split+CW setting
+    // ARCI does not persist this, so re-send it once the CAT link is up (deferred like AI mode)
+    auto_filter_b_split_cw_enabled = settings.auto_filter_b_split_cw_enabled;
+    if (lv_obj_is_valid(ui_AutoFilterBSplitCwSwitch)) {
+        if (auto_filter_b_split_cw_enabled) {
+            lv_obj_add_state(ui_AutoFilterBSplitCwSwitch, LV_STATE_CHECKED);
+        } else {
+            lv_obj_remove_state(ui_AutoFilterBSplitCwSwitch, LV_STATE_CHECKED);
+        }
+    }
+    lv_subject_set_int(&radio_auto_filter_b_split_cw_subject, auto_filter_b_split_cw_enabled ? 1 : 0);
+    {
+        static bool deferred_auto_filter_b;
+        deferred_auto_filter_b = auto_filter_b_split_cw_enabled;
+
+        // Create one-shot timer to push the preference to ARCI after 100ms
+        lv_timer_t* auto_filter_b_timer = lv_timer_create(auto_filter_b_restore_timer_cb, 100, &deferred_auto_filter_b);
+        lv_timer_set_repeat_count(auto_filter_b_timer, 1);
+    }
 
     // Apply antenna switch setting
     if (lv_obj_is_valid(ui_AntennaSwitchButton)) {
@@ -1710,6 +1798,11 @@ void ui_Screen2_screen_init(void) {
     ui_TransverterButton = lv_obj_get_child(row_transverter, -1); // Get the switch from the container
     lv_obj_add_event_cb(ui_TransverterButton, ui_event_TransverterButton_clicked, LV_EVENT_VALUE_CHANGED, NULL);
 
+    // Auto IF Filter B on Split+CW (UIAF) - handled entirely by ARCI
+    lv_obj_t *row_auto_filter_b = create_switch(sec_cat, NULL, "Auto IF Filter B on Split+CW", false);
+    ui_AutoFilterBSplitCwSwitch = lv_obj_get_child(row_auto_filter_b, -1); // Get the switch from the container
+    lv_obj_add_event_cb(ui_AutoFilterBSplitCwSwitch, ui_event_AutoFilterBSplitCwSwitch, LV_EVENT_VALUE_CHANGED, NULL);
+
     // Panel Data (UIDE) with icon - controls data updates from panel
     lv_obj_t *row_panel_data = create_switch(sec_cat, NULL, "Panel Data", true); // Default: enabled
     ui_PanelDataButton = lv_obj_get_child(row_panel_data, -1); // Get the switch from the container
@@ -1877,6 +1970,9 @@ void ui_Screen2_screen_init(void) {
 
     // Transverter toggle updates
     lv_subject_add_observer_obj(&radio_transverter_enabled_subject, ui_transverter_enabled_observer_cb, ui_Screen2, NULL);
+
+    // Auto IF Filter B on Split+CW toggle updates (UIAF confirmation from ARCI)
+    lv_subject_add_observer_obj(&radio_auto_filter_b_split_cw_subject, ui_auto_filter_b_split_cw_observer_cb, ui_Screen2, NULL);
 
     // Antenna status updates
     ESP_LOGD("UI_Screen2", "Registering antenna observers");

@@ -2998,6 +2998,15 @@ void parse_cat_command(const char *response) {
 
                 // Update transverter toggle state via subject (thread-safe)
                 radio_subject_set_int_async(&radio_transverter_enabled_subject, state);
+            } else if (response[2] == 'A' && response[3] == 'F') {
+                // UIAF - Auto IF Filter B on Split+CW (ARCI custom command)
+                // UIAF0; = disable, UIAF1; = enable
+                // Filter switching logic lives entirely in ARCI; this is the confirmation frame
+                int state = atoi(response + 4);
+                ESP_LOGI(TAG, "UIAF received: state=%d", state);
+
+                // Update auto filter B toggle state via subject (thread-safe)
+                radio_subject_set_int_async(&radio_auto_filter_b_split_cw_subject, state);
             } else if (response[2] == 'P' && response[3] == 'S') {
                 // UIPS - Panel Status (wake/sleep signaling from remote panel)
                 // UIPS;  = query current state
