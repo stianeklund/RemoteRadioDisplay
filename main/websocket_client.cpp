@@ -595,18 +595,17 @@ static void process_websocket_message(const char *message, size_t len)
             }
 
             // Check if this is a relay names response
-            cJSON *relay_names_item = cJSON_GetObjectItem(data_item, "relay_names");
-            if (relay_names_item && cJSON_IsObject(relay_names_item)) {
-                ESP_LOGI(TAG, "Received relay names response from API");
-
+            // Server places numbered names directly under data, no "relay_names" wrapper key
+            // (see rs232_band_decoder docs/WEBSOCKET_API.md relay_names response)
+            {
                 // Parse relay names from response
-                // Expected format: {"relay_names": {"1": "Triband", "2": "Inverted V", ...}}
+                // Expected format: {"data": {"1": "Triband", "2": "Inverted V", ...}}
                 bool names_updated = false;
 
                 for (int i = 1; i <= MAX_ANTENNA_RELAYS; i++) {
                     char relay_key[4];
                     snprintf(relay_key, sizeof(relay_key), "%d", i);
-                    cJSON *name_item = cJSON_GetObjectItem(relay_names_item, relay_key);
+                    cJSON *name_item = cJSON_GetObjectItem(data_item, relay_key);
 
                     if (name_item && cJSON_IsString(name_item)) {
                         const char *name = name_item->valuestring;
